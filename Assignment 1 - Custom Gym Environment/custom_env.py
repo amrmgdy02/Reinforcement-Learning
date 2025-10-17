@@ -16,6 +16,13 @@ class GridMazeEnv(gym.Env):
         self.height = self.size * self.cell_size
         self._num_mines = num_mines
         
+        self.transition_model = {
+            0: {0: 0.7, 1: 0.15, 3: 0.15},  # Right
+            1: {1: 0.7, 0: 0.15, 2: 0.15},  # Up
+            2: {2: 0.7, 1: 0.15, 3: 0.15},  # Left
+            3: {3: 0.7, 0: 0.15, 2: 0.15},  # Down
+        }
+        
         assert size > 2, "Size must be greater than 2"
         
         if layout_seed is None:
