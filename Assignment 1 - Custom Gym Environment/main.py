@@ -111,7 +111,7 @@ def main():
     video_env.close()
 
 if __name__ == "__main__":
-    #main()
+    main()
     # envs = generate_all_possible_envs(size=5, num_mines=2)
     # optimal_policies = {}
     # for i, env in enumerate(envs):
