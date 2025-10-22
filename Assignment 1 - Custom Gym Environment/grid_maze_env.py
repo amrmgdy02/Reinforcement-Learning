@@ -6,7 +6,7 @@ import pygame
 class GridMazeEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 2}
 
-    def __init__(self, size: int = 5, layout_seed: Optional[int]=None, num_mines: int = 2, cell_size: int = 100, render_mode="human"):
+    def __init__(self, size: int = 5,  mines: Optional[np.array]=None, target_location: Optional[np.array]=None, layout_seed: Optional[int]=None, num_mines: int = 2, cell_size: int = 100, render_mode="human"):
 
         super().__init__()
         self.size = size
@@ -41,10 +41,10 @@ class GridMazeEnv(gym.Env):
         layout_rng = np.random.default_rng(seed=self._layout_seed)
         
         # TARGET
-        self._target_location = layout_rng.integers(0, size, size=2, dtype=np.int32)
+        self._target_location = target_location if target_location is not None else layout_rng.integers(0, size, size=2, dtype=np.int32)
         
         # MINES
-        self._mines = self._generate_mines(layout_rng)
+        self._mines = mines if mines is not None else self._generate_mines(layout_rng)
 
         # AGENT
         self._agent_location = np.array([-1, -1], dtype=np.int32) # will be set randomly in reset() (each episode)
@@ -231,11 +231,11 @@ class GridMazeEnv(gym.Env):
             float: _description_
         """
         if (agent_pos == self._target_location).all():
-            return 1.0
+            return 10.0
         elif any((agent_pos == mine).all() for mine in self._mines):
-            return -1.0
+            return -10.0
         else:
-            return -0.01
+            return -0.5
         
     def is_terminal_state(self, state: np.ndarray) -> bool:
         """Check if a given state is terminal.
