@@ -23,6 +23,13 @@ class GridMazeEnv(gym.Env):
             3: {3: 0.7, 0: 0.15, 2: 0.15},  # Down
         }
         
+        # self.transition_model = {
+        #     0: {0: 1.0},  # Right
+        #     1: {1: 1.0},  # Up
+        #     2: {2: 1.0},  # Left
+        #     3: {3: 1.0},  # Down
+        # }
+        
         assert size > 2, "Size must be greater than 2"
         
         if layout_seed is None:
@@ -52,7 +59,7 @@ class GridMazeEnv(gym.Env):
 
         self.action_space = gym.spaces.Discrete(4)
 
-        self._action_to_direction = {
+        self.action_to_direction = {
             0: np.array([0, 1]),   # Right: (row+0, col+1)
             1: np.array([-1, 0]),  # Up: (row-1, col+0)
             2: np.array([0, -1]),  # Left: (row+0, col-1)
@@ -107,6 +114,51 @@ class GridMazeEnv(gym.Env):
             "mines": self._mines,
             "target": self._target_location,
         }
+
+
+    def get_possible_actions(self, state: np.ndarray) -> list[int]:
+        """Get possible actions from a given state.
+        """
+        
+        possible_actions = []
+        for action in range(self.action_space.n):
+            direction = self.action_to_direction[action]
+            new_state = state + direction
+            if (0 <= new_state[0] < self.size) and (0 <= new_state[1] < self.size):
+                possible_actions.append(action)
+                
+                
+        print("Possible actions from state", state, ":", possible_actions)        
+        return possible_actions
+
+    def get_possible_states(self, state: np.ndarray) -> list[tuple[int, list[tuple[int, tuple[int, int]]]]]:
+        """Get possible resulting states with their probabilities from all actions in a given state.
+
+        Args:
+            state (np.ndarray): Current state. Shape [2] (row, col).
+        Returns:
+            list[tuple[int, list[tuple[int, tuple[int, int]]]]]: List of possible actions with their possible resulting states (row, col) along with their probabilities.
+        """
+        
+        possible_states = []
+        for action in self.get_possible_actions(state):
+        #for action in range(self.action_space.n):
+            action_possible_states = []
+            direction_1 = self.action_to_direction[action]
+            new_state_1 = np.clip(state + direction_1, 0, self.size - 1)
+            action_possible_states.append((0.7, (new_state_1[0], new_state_1[1])))
+            
+            direction_2 = self.action_to_direction[(action + 1) % 4]
+            new_state_2 = np.clip(state + direction_2, 0, self.size - 1)
+            action_possible_states.append((0.15, (new_state_2[0], new_state_2[1])))
+
+            direction_3 = self.action_to_direction[(action - 1) % 4]
+            new_state_3 = np.clip(state + direction_3, 0, self.size - 1)
+            action_possible_states.append((0.15, (new_state_3[0], new_state_3[1])))
+
+            possible_states.append((action, action_possible_states))
+
+        return possible_states
     
     
     def reset(self, seed: Optional[int] = None, options: Optional[dict] = None):
@@ -135,6 +187,7 @@ class GridMazeEnv(gym.Env):
         Returns:
             int: The actual action after applying noise
         """
+        #return action  # deterministic for now
         prob = self.np_random.random()
         if prob <= 0.7:
             return action  
@@ -157,22 +210,12 @@ class GridMazeEnv(gym.Env):
             action = action.item()
         # Map the discrete action (0-3) to a movement direction
         actual_movement = self._get_stochastic_movement(action)
-        direction = self._action_to_direction[actual_movement]
+        direction = self.action_to_direction[actual_movement]
 
         self._agent_location = np.clip(self._agent_location + direction, 0, self.size - 1)
-
-        # Check for termination conditions
-        if (self._agent_location == self._target_location).all():
-            reward = 10.0
-            terminated = True
         
-        elif any((self._agent_location == mine).all() for mine in self._mines):
-            reward = -10.0
-            terminated = True
-            
-        else:
-            reward = -1.0
-            terminated = False
+        reward = self.calc_reward(self._agent_location)
+        terminated = (self._agent_location == self._target_location).all() or any((self._agent_location == mine).all() for mine in self._mines)
 
         truncated = False
         info = {}
@@ -180,7 +223,40 @@ class GridMazeEnv(gym.Env):
         
         return observation, reward, terminated, truncated, info
     
+    def calc_reward(self, agent_pos)-> float:
+        """calculate the reward of being at a given state
+
+        Args:
+            agent_pos (_type_): _description_
+
+        Returns:
+            float: _description_
+        """
+        if (agent_pos == self._target_location).all():
+            return 1.0
+        elif any((agent_pos == mine).all() for mine in self._mines):
+            return -1.0
+        else:
+            return -0.01
+        
+    def is_terminal_state(self, state: np.ndarray) -> bool:
+        """Check if a given state is terminal.
+
+        Args:
+            state (np.ndarray): State to check. Shape [2] (row, col).
+
+        Returns:
+            bool: True if the state is terminal, False otherwise.
+        """
+        return (state == self._target_location).all() or any((state == mine).all() for mine in self._mines)
     
+    
+    def show_env_info(self):
+        """Print environment information for debugging."""
+        print(f"Environment Size: {self.size}x{self.size}")
+        print(f"Target Location: {self._target_location}")
+        print(f"Mines Locations: {self._mines}")
+
     def render(self):
         """Render the environment to the screen or as an RGB array.
 
