@@ -145,6 +145,7 @@ def visualize_policy(policy: np.ndarray):
     Args:
         policy (np.ndarray): The policy to visualize. Shape [num_states, num_actions].
     """
+    print("VISUALIZING POLICY:")
     arrow_dict = {
         0: '→',  # Right
         1: '↑',  # Up
@@ -157,23 +158,37 @@ def visualize_policy(policy: np.ndarray):
         for y in range(env_size):
             best_action = np.argmax(policy[x, y])
             row_arrows += arrow_dict[best_action] + ' '
+        
         print(row_arrows)
+    print()
 
+def visualize_value_function(V: np.ndarray):
+    """Visualize the value function.
+
+    Args:
+        V (np.ndarray): The value function to visualize. Shape [num_states].
+    """
+    print("VISUALIZING VALUE FUNCTION:")
+    env_size = V.shape[0]
+    for x in range(env_size):
+        row_values = ''
+        for y in range(env_size):
+            row_values += f"{V[x, y]:6.2f} "
+        print(row_values, end='\n')
+    print()
 
 ################################ TEST TIME ###################################
-custom_env = GridMazeEnv(size=3, layout_seed=42, render_mode="rgb_array")
-optimal_policy, optimal_value_function = policy_iteration(custom_env, gamma=0.5)
+custom_env = GridMazeEnv(size=10, layout_seed=42, render_mode="rgb_array")
+optimal_policy, optimal_value_function = policy_iteration(custom_env, gamma=0.7)
 visualize_policy(optimal_policy)
-print("Optimal Value Function:", optimal_value_function)
+visualize_value_function(optimal_value_function)
 
 video_env = RecordVideo(custom_env, video_folder="videos", episode_trigger=lambda e: True, fps=2)
 
 state, _ = video_env.reset()
 done = False
 while not done:
-    print("Current State:", state["agent"])
     action = int(np.argmax(optimal_policy[state["agent"][0], state["agent"][1]]))
-    print("Taking Action:", action)
     state, reward, terminated, truncated, _ = video_env.step(action)
     done = terminated or truncated
 
