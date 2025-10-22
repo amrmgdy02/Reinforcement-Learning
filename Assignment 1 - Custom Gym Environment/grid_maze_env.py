@@ -254,6 +254,17 @@ class GridMazeEnv(gym.Env):
         print(f"Environment Size: {self.size}x{self.size}")
         print(f"Target Location: {self._target_location}")
         print(f"Mines Locations: {self._mines}")
+        
+    
+    def save_env_as_image(self, filename: str):
+        """Save the current environment state as an image file.
+
+        Args:
+            filename (str): Path to save the image file.
+        """
+        rgb_array = self.render()
+        pygame.image.save(pygame.surfarray.make_surface(np.transpose(rgb_array, (1, 0, 2))), filename)
+        
 
     def render(self):
         """Render the environment to the screen or as an RGB array.
