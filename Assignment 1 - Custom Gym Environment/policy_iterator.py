@@ -118,7 +118,7 @@ class PolicyIterator:
             Tuple[np.ndarray, np.ndarray]: The optimal policy and its value function.
         """
         old_policy = np.zeros_like(self.policy)
-        
+        num_iterations = 0
         for i in range(self.max_iterations):
             # Policy evaluation
             self.value_function = self.evaluate_policy()
@@ -128,11 +128,12 @@ class PolicyIterator:
             
             # Check convergence
             if np.allclose(self.policy, old_policy):
+                num_iterations = i + 1
                 break
                 
             old_policy = self.policy.copy()
         
-        return self.policy, self.value_function
+        return self.policy, self.value_function, num_iterations
 
     def visualize_policy(self):
         """Visualize the current policy using arrows."""
