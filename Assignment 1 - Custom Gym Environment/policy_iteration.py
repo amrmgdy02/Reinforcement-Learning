@@ -1,5 +1,5 @@
 import numpy as np
-from custom_env import GridMazeEnv
+from grid_maze_env import GridMazeEnv
 from gymnasium.wrappers import RecordVideo
 
 def policy_evaluation(env: GridMazeEnv, policy: np.ndarray, gamma: float = 1.0, theta: float = 1e-3) -> np.ndarray:
