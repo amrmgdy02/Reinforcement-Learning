@@ -126,9 +126,7 @@ class GridMazeEnv(gym.Env):
             new_state = state + direction
             if (0 <= new_state[0] < self.size) and (0 <= new_state[1] < self.size):
                 possible_actions.append(action)
-                
-                
-        print("Possible actions from state", state, ":", possible_actions)        
+        
         return possible_actions
 
     def get_possible_states(self, state: np.ndarray) -> list[tuple[int, list[tuple[int, tuple[int, int]]]]]:
