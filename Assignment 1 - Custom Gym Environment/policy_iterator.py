@@ -32,13 +32,13 @@ class PolicyIterator:
         V = np.zeros((self.env_size, self.env_size))
         
         # Initialize terminal state values
-        for x in range(self.env_size):
-            for y in range(self.env_size):
-                if self.env.is_terminal_state([x, y]):
-                    if (np.array([x, y]) == self.env._target_location).all():
-                        V[x, y] = 10.0
-                    elif any((np.array([x, y]) == mine).all() for mine in self.env._mines):
-                        V[x, y] = -10.0
+        # for x in range(self.env_size):
+        #     for y in range(self.env_size):
+        #         if self.env.is_terminal_state(np.array([x, y])):
+        #             if (np.array([x, y]) == self.env._target_location).all():
+        #                 V[x, y] = 10.0
+        #             elif any((np.array([x, y]) == mine).all() for mine in self.env._mines):
+        #                 V[x, y] = -10.0
                         
         while True:
             delta = 0
@@ -46,7 +46,7 @@ class PolicyIterator:
             
             for x in range(self.env_size):
                 for y in range(self.env_size):
-                    if self.env.is_terminal_state([x, y]):
+                    if self.env.is_terminal_state(np.array([x, y])):
                         continue
                         
                     new_value = 0
@@ -86,10 +86,10 @@ class PolicyIterator:
         
         for x in range(self.env_size):
             for y in range(self.env_size):
-                if self.env.is_terminal_state([x, y]):
+                if self.env.is_terminal_state(np.array([x, y])):
                     continue
                 
-                possible_states_info = self.env.get_possible_states([x, y])
+                possible_states_info = self.env.get_possible_states(np.array([x, y]))
                 
                 if possible_states_info:
                     action_values = []
@@ -98,7 +98,7 @@ class PolicyIterator:
                     for action, action_possible_states in possible_states_info:
                         action_value = 0
                         for prob, (new_x, new_y) in action_possible_states:
-                            reward = self.env.calc_reward([new_x, new_y])
+                            reward = self.env.calc_reward(np.array([new_x, new_y]))
                             action_value += prob * (reward + self.gamma * V_values[new_x, new_y])
                         action_values.append(action_value)
                         valid_actions.append(action)
