@@ -4,3 +4,4 @@ videos/
 imgs/
 wandb/
 MNIST
+videos_ddqn
