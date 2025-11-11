@@ -28,7 +28,8 @@ class ReplayBuffer:
 
     def sample(self, batch_size: int):
         batch = random.sample(self.buffer, batch_size)
-        states, actions, rewards, next_states, dones = map(np.array, zip(*batch))
+        tuples = [(t.state, t.action, t.reward, t.next_state, t.done) for t in batch]
+        states, actions, rewards, next_states, dones = map(np.array, zip(*tuples))
         return (
             states,
             actions.astype(np.int64),
@@ -56,7 +57,7 @@ class BaseAgent(ABC):
         self.replay_buffer = ReplayBuffer(capacity=10000)
         
         # Define network in subclass
-        self.network = None
+        self.policy_network = None
         self.optimizer = None
 
     def reset_memory(self):
@@ -72,7 +73,7 @@ class BaseAgent(ABC):
             return random.randint(0, self.action_dim - 1)
         state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
         with torch.no_grad():
-            q_values = self.network(state)
+            q_values = self.policy_network(state)
         return q_values.argmax().item()
 
     @abstractmethod
@@ -119,12 +120,12 @@ class DQNAgent(BaseAgent):
         super().__init__(state_dim, action_dim, hidden_dims, optimizer, loss_fn, lr, gamma)
         
         # single Q-network
-        self.network = DQN(state_dim, action_dim, hidden_dims).to(self.device)
+        self.policy_network = DQN(state_dim, action_dim, hidden_dims).to(self.device)
         
         if optimizer == "sgd":
-            self.optimizer = torch.optim.SGD(self.network.parameters(), lr=lr)
+            self.optimizer = torch.optim.SGD(self.policy_network.parameters(), lr=lr)
         else:
-            self.optimizer = torch.optim.Adam(self.network.parameters(), lr=lr)
+            self.optimizer = torch.optim.Adam(self.policy_network.parameters(), lr=lr)
 
     def optimize_step(self, batch_size: int):
         if len(self.replay_buffer) < batch_size:
@@ -138,11 +139,11 @@ class DQNAgent(BaseAgent):
         dones = torch.FloatTensor(dones).unsqueeze(1).to(self.device)
 
         # Current Q-values
-        q_values = self.network(states).gather(1, actions)
+        q_values = self.policy_network(states).gather(1, actions)
 
         with torch.no_grad():
-            next_q_values = self.network(next_states).max(1, keepdim=True)[0]
-            target_q_values = rewards + (1 - dones) * self.gamma * next_q_values  # ✅ correct DQN target
+            next_q_values = self.policy_network(next_states).max(1, keepdim=True)[0]
+            target_q_values = rewards + (1 - dones) * self.gamma * next_q_values
 
         loss = self.loss_fn(q_values, target_q_values)
 
@@ -151,10 +152,10 @@ class DQNAgent(BaseAgent):
         self.optimizer.step()
 
     def save(self, filepath: str):
-        torch.save(self.network.state_dict(), filepath)
+        torch.save(self.policy_network.state_dict(), filepath)
         
     def load(self, filepath: str):
-        self.network.load_state_dict(torch.load(filepath))
+        self.policy_network.load_state_dict(torch.load(filepath))
 
 # -----------------------------
 # DDQNAgent (inherits BaseAgent)
@@ -194,7 +195,6 @@ class DDQNAgent(BaseAgent):
         q_values = self.policy_network(states).gather(1, actions)
 
         with torch.no_grad():
-            # DDQN target: select a* using policy_net, evaluate with target_net
             next_actions = self.policy_network(next_states).argmax(1, keepdim=True)
             next_q_values = self.target_network(next_states).gather(1, next_actions)
             target_q_values = rewards + (1 - dones) * self.gamma * next_q_values
