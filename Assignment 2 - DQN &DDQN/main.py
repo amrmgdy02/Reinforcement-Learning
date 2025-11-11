@@ -1,4 +1,4 @@
-from dqn import DQNAgent, DDQNAgent
+from dqn import DQNAgent, DDQNAgent, BaseAgent
 import torch
 import numpy as np
 import gymnasium as gym
@@ -148,7 +148,7 @@ def train(
     }
 
 
-def evaluate(agent, env_name: str, episodes: int = 10, max_steps: int = 1000, seed: int = 0):
+def evaluate(agent: BaseAgent, env_name: str, episodes: int = 10, max_steps: int = 1000, seed: int = 0):
     """
     Evaluate a trained DQN or DDQN agent.
     Runs the agent in greedy mode (epsilon = 0.0) for given episodes.
@@ -187,10 +187,9 @@ def evaluate(agent, env_name: str, episodes: int = 10, max_steps: int = 1000, se
     print(f"\n✅ Average return over {episodes} episodes: {mean_return:.2f}")
     return mean_return, all_returns
 
-def record_playback(agent, env_name: str, video_dir: str = "./videos", episodes: int = 3, max_steps: int = 1000):
+def record_playback(agent: BaseAgent, env_name: str, video_dir: str = "./videos", episodes: int = 3, max_steps: int = 1000):
     """
     Records videos of a trained agent interacting with the environment.
-    Compatible with both DQNAgent and DDQNAgent.
     """
     import gymnasium as gym
     import os
@@ -202,7 +201,28 @@ def record_playback(agent, env_name: str, video_dir: str = "./videos", episodes:
         from gym.wrappers import RecordVideo
 
     os.makedirs(video_dir, exist_ok=True)
-    env = gym.make(env_name)
+
+    # Create environment with an image-producing render_mode when possible.
+    # RecordVideo requires the wrapped env to return images (e.g. via "rgb_array").
+    try:
+        env = gym.make(env_name, render_mode="rgb_array")
+    except TypeError:
+        # gym.make may not accept render_mode in older versions; create default env
+        env = gym.make(env_name)
+
+    # If env was created without a render_mode, check metadata and try to recreate.
+    if getattr(env, "render_mode", None) is None:
+        supported = env.metadata.get("render_modes", []) if hasattr(env, "metadata") else []
+        if "rgb_array" in supported:
+            env.close()
+            env = gym.make(env_name, render_mode="rgb_array")
+        else:
+            env.close()
+            raise ValueError(
+                "Environment does not support an image render mode required by RecordVideo. "
+                "Initialize your environment with a render_mode that returns an image, such as 'rgb_array'."
+            )
+
     env = RecordVideo(env, video_folder=video_dir, episode_trigger=lambda ep: True)
 
     print(f"🎥 Recording {episodes} episode(s) to: {os.path.abspath(video_dir)}")
