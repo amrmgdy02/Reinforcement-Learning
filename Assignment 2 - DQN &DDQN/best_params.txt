@@ -40,3 +40,10 @@ Best hyperparameters for CartPole-v1:
 Best is trial 7 with value: 422.9.
 {'lr': 6.77747056846666e-05, 'gamma': 0.9920673648047162, 'batch_size': 32,
  'replay_size': 20000, 'min_replay_size': 1000, 'eps_decay_steps': 14690, 'episodes': 300}
+
+
+Best hyperparameters for Pendulum
+Trial 11 finished with value: -131.6055433535328 and parameters:
+ {'lr': 0.00015547872665148672, 'gamma': 0.9781448066613916, 'batch_size': 256,
+  'replay_size': 250000, 'min_replay_size': 6000, 'eps_decay_steps': 22391, 'episodes': 800}
+  . Best is trial 11 with value: -131.6055433535328.

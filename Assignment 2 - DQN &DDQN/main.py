@@ -9,6 +9,35 @@ import time
 import os
 
 # -------------------------------
+# Discretize continuous actions
+# -------------------------------
+class DiscretizedActionWrapper(gym.ActionWrapper):
+    def __init__(self, env, n_bins=11):
+        super().__init__(env)
+        self.n_bins = n_bins
+        # create discrete actions evenly spaced in original action space
+        self.discrete_actions = np.linspace(env.action_space.low[0], env.action_space.high[0], n_bins)
+        self.action_space = gym.spaces.Discrete(n_bins)
+
+    def action(self, action_idx):
+        return np.array([self.discrete_actions[action_idx]], dtype=np.float32)
+
+# -------------------------------
+# Update train and evaluate to use wrapper if needed
+# -------------------------------
+def make_env(env_name: str, render_mode=None):
+    if render_mode:
+        env = gym.make(env_name, render_mode=render_mode)
+    else:
+        env = gym.make(env_name)
+    if env_name == "Pendulum-v1":
+        env = DiscretizedActionWrapper(env, n_bins=11)
+    return env
+
+
+
+
+# -------------------------------
 # Train function
 # -------------------------------
 def train(
@@ -35,7 +64,7 @@ def train(
     device = torch.device(device_str if device_str else "cuda" if torch.cuda.is_available() else "cpu")
 
     # Initialize environment
-    env = gym.make(env_name)
+    env = make_env(env_name)
     obs, _ = env.reset(seed=seed)
     obs_dim = np.array(obs).flatten().shape[0]
 
@@ -125,13 +154,16 @@ def train(
 # -------------------------------
 # Evaluation
 # -------------------------------
-def evaluate(agent: BaseAgent, env_name: str, episodes: int = 10, max_steps: int = 1000, seed: int = 0):
-    env = gym.make(env_name)
+def evaluate(agent: BaseAgent, env_name: str, episodes: int = 100, max_steps: int = 1000, seed: int = 0):
+    env = make_env(env_name)
     all_returns = []
+    episode_lengths = []
 
     for ep in range(episodes):
         state, _ = env.reset(seed=seed + ep)
         ep_reward = 0.0
+        ep_length = 0
+
         for t in range(max_steps):
             action = agent.select_action(state, epsilon=0.0)
             step_result = env.step(action)
@@ -142,15 +174,21 @@ def evaluate(agent: BaseAgent, env_name: str, episodes: int = 10, max_steps: int
                 next_state, reward, done, info = step_result
             state = next_state
             ep_reward += reward
+            ep_length += 1
             if done:
                 break
+
         all_returns.append(ep_reward)
-        print(f"Episode {ep + 1}: return = {ep_reward:.2f}")
+        episode_lengths.append(ep_length)
+        print(f"Episode {ep + 1}: return = {ep_reward:.2f} | length = {ep_length}")
 
     env.close()
     mean_return = float(np.mean(all_returns))
+    mean_length = float(np.mean(episode_lengths))
     print(f"\n✅ Average return over {episodes} episodes: {mean_return:.2f}")
-    return mean_return, all_returns
+    print(f"✅ Average episode duration over {episodes} episodes: {mean_length:.2f}")
+
+    return mean_return, all_returns, episode_lengths
 
 # -------------------------------
 # Record Playback
@@ -163,15 +201,15 @@ def record_playback(agent: BaseAgent, env_name: str, video_dir: str = "./videos"
 
     os.makedirs(video_dir, exist_ok=True)
     try:
-        env = gym.make(env_name, render_mode="rgb_array")
+        env = make_env(env_name, render_mode="rgb_array")
     except TypeError:
-        env = gym.make(env_name)
+        env = make_env(env_name)
 
     if getattr(env, "render_mode", None) is None:
         supported = env.metadata.get("render_modes", []) if hasattr(env, "metadata") else []
         if "rgb_array" in supported:
             env.close()
-            env = gym.make(env_name, render_mode="rgb_array")
+            env = make_env(env_name, render_mode="rgb_array")
         else:
             env.close()
             raise ValueError("Environment must support image render mode 'rgb_array'.")
@@ -230,6 +268,14 @@ def record_playback(agent: BaseAgent, env_name: str, video_dir: str = "./videos"
 #         min_replay_size = trial.suggest_int("min_replay_size", 5000, 10000, step=500)
 #         eps_decay_steps = trial.suggest_int("eps_decay_steps", 50_000, 150_000)
 #         episodes = trial.suggest_int("episodes", 800, 1500, step=100)
+#     elif env_name == "Pendulum-v1":
+#         lr = trial.suggest_float("lr", 5e-5, 1e-3, log=True)
+#         gamma = trial.suggest_float("gamma", 0.95, 0.999)
+#         batch_size = trial.suggest_int("batch_size", 64, 256, step=64)
+#         replay_size = trial.suggest_int("replay_size", 100_000, 300_000, step=50_000)
+#         min_replay_size = trial.suggest_int("min_replay_size", 3000, 8000, step=1000)
+#         eps_decay_steps = trial.suggest_int("eps_decay_steps", 20_000, 80_000)
+#         episodes = trial.suggest_int("episodes", 500, 1000, step=100)
 #     else:
 #         raise ValueError(f"Unsupported environment: {env_name}")
 
@@ -282,7 +328,7 @@ def record_playback(agent: BaseAgent, env_name: str, video_dir: str = "./videos"
 # # Run tuning for each environment
 # # -------------------------------
 # if __name__ == "__main__":
-#     envs = ["CartPole-v1", "Acrobot-v1", "MountainCar-v0"]
+#     envs = ["Pendulum-v1"]
 #     for env_name in envs:
 #         tune_and_train(env_name, n_trials=20)  # increase n_trials for more exhaustive search
 
@@ -326,6 +372,16 @@ if __name__ == "__main__":
             "episodes": 1300,
             "min_replay_size": 7_000
         },
+
+        "Pendulum-v1": {
+            "lr": 0.000155,
+            "gamma": 0.97814,
+            "batch_size": 256,
+            "replay_size": 250_000,
+            "eps_decay_steps": 22_391,
+            "episodes": 800,
+            "min_replay_size": 6_000
+        }
     }
 
     for env_name, params in best_params_per_env.items():
@@ -344,8 +400,19 @@ if __name__ == "__main__":
             use_wandb=True
         )
 
-        # Evaluate on 100 episodes
-        evaluate(agent, env_name=env_name, episodes=100)
+        # Evaluate on 100 episodes and get durations
+        mean_reward, all_rewards, episode_lengths = evaluate(agent, env_name=env_name, episodes=100)
+
+        # Plot episode durations to show stability
+        import matplotlib.pyplot as plt
+
+        plt.figure(figsize=(10,5))
+        plt.plot(episode_lengths)
+        plt.xlabel("Episode")
+        plt.ylabel("Episode Duration (steps)")
+        plt.title(f"Episode Durations for {env_name}")
+        plt.show()
 
         # Record a few episodes
         record_playback(agent, env_name=env_name, video_dir=f"./videos_{env_name}", episodes=2)
+
