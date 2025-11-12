@@ -333,8 +333,34 @@ def record_playback(agent: BaseAgent, env_name: str, video_dir: str = "./videos"
 #         tune_and_train(env_name, n_trials=20)  # increase n_trials for more exhaustive search
 
 #######################################################################
+def save_model(agent: BaseAgent, env_name: str, algo: str = "ddqn"):
+    if algo.lower() == "ddqn":
+        model_dir = "./saved_models"
+    else:
+        model_dir = "./saved_models/dqn"
+    os.makedirs(model_dir, exist_ok=True)
+    model_path = os.path.join(model_dir, f"{env_name}_{algo.lower()}.pth")
+    agent.save(model_path)
+    print(f"Model saved at {model_path}")
 
+def load_saved_model(env_name: str, algo: str = "ddqn") -> BaseAgent:
+    env = make_env(env_name)
+    state_dim = env.observation_space.shape[0]
+    action_dim = env.action_space.n
 
+    if algo.lower() == "dqn":
+        agent = DQNAgent(state_dim=state_dim, action_dim=action_dim)
+    elif algo.lower() == "ddqn":
+        agent = DDQNAgent(state_dim=state_dim, action_dim=action_dim)
+    else:
+        raise ValueError(f"Unsupported algorithm: {algo}")
+    if algo.lower() == "ddqn":
+        model_dir = "./saved_models"
+    else:
+        model_dir = "./saved_models/dqn"
+    model_path = os.path.join(model_dir, f"{env_name}_{algo.lower()}.pth")
+    agent.load(model_path)  # only base path; loads policy and target internally
+    return agent
 
 # Main: train with predefined best hyperparameters
 # -------------------------------
@@ -385,27 +411,32 @@ if __name__ == "__main__":
     }
 
     for env_name, params in best_params_per_env.items():
-        print(f"\n--- Training {env_name} with best parameters ---\n")
+        # print(f"\n--- Training {env_name} with best parameters ---\n")
         
-        agent, stats = train(
-            env_name=env_name,
-            algo="ddqn",
-            episodes=params["episodes"],  
-            lr=params["lr"],
-            gamma=params["gamma"],
-            batch_size=params["batch_size"],
-            replay_size=params["replay_size"],
-            eps_decay_steps=params["eps_decay_steps"],
-            min_replay_size=params["min_replay_size"],
-            use_wandb=True
-        )
+        # agent, stats = train(
+        #     env_name=env_name,
+        #     algo="dqn",
+        #     episodes=params["episodes"],  
+        #     lr=params["lr"],
+        #     gamma=params["gamma"],
+        #     batch_size=params["batch_size"],
+        #     replay_size=params["replay_size"],
+        #     eps_decay_steps=params["eps_decay_steps"],
+        #     min_replay_size=params["min_replay_size"],
+        #     use_wandb=True
+        # )
 
-        # Evaluate on 100 episodes and get durations
+        # # ✅ Save model
+        # save_model(agent, env_name=env_name, algo="dqn")
+        
+        
+        agent = load_saved_model(env_name=env_name, algo="ddqn")
+
+        # Evaluate on 100 episodes
         mean_reward, all_rewards, episode_lengths = evaluate(agent, env_name=env_name, episodes=100)
 
-        # Plot episode durations to show stability
+        # Plot episode durations
         import matplotlib.pyplot as plt
-
         plt.figure(figsize=(10,5))
         plt.plot(episode_lengths)
         plt.xlabel("Episode")
@@ -415,4 +446,3 @@ if __name__ == "__main__":
 
         # Record a few episodes
         record_playback(agent, env_name=env_name, video_dir=f"./videos_{env_name}", episodes=2)
-
