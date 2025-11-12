@@ -72,7 +72,7 @@ class BaseAgent(ABC):
         
     """
     def __init__(self, 
-                 state_dim, action_dim, hidden_dims=(128, 128),
+                 state_dim, action_dim, hidden_dims=(256, 256),
                  optimizer="adam", loss_fn=F.mse_loss, lr=1e-3, gamma=0.99):
         
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -135,7 +135,7 @@ class DQN(nn.Module):
         hidden_dims (tuple): Sizes of hidden layers.
         
     """
-    def __init__(self, input_dim, output_dim, hidden_dims=(128, 128)):
+    def __init__(self, input_dim, output_dim, hidden_dims=(256, 256)):
         super(DQN, self).__init__()
         layers = []
         dims = [input_dim] + list(hidden_dims)
@@ -154,7 +154,7 @@ class DQN(nn.Module):
 # -----------------------------
 class DQNAgent(BaseAgent):
     def __init__(self, 
-                 state_dim, action_dim, hidden_dims=(128, 128),
+                 state_dim, action_dim, hidden_dims=(256, 256),
                  optimizer="adam", loss_fn=F.mse_loss, lr=1e-3, gamma=0.99):
         
         super().__init__(state_dim, action_dim, hidden_dims, optimizer, loss_fn, lr, gamma)
@@ -202,7 +202,7 @@ class DQNAgent(BaseAgent):
 # -----------------------------
 class DDQNAgent(BaseAgent):
     def __init__(self, 
-                 state_dim, action_dim, hidden_dims=(128, 128),
+                 state_dim, action_dim, hidden_dims=(256, 256),
                  optimizer="adam", loss_fn=F.mse_loss, lr=1e-3, gamma=0.99,
                  target_update_freq=100):
         
