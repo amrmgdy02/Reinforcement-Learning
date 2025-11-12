@@ -26,10 +26,20 @@ class ReplayBuffer:
     def push(self, transition: Transition):
         self.buffer.append(transition)
 
+    """
+        Sample a batch of transitions.
+        what it do in detail:
+        1. Randomly sample 'batch_size' transitions from the buffer.
+        2. Unzip the sampled transitions into separate lists for states, actions, rewards, next_states, and dones.
+        3. Convert these lists into numpy arrays and ensure they have the correct data types.
+        4. Return the arrays as a tuple.
+        Returns:
+            A tuple of (states, actions, rewards, next_states, dones)
+    """
     def sample(self, batch_size: int):
-        batch = random.sample(self.buffer, batch_size)
-        tuples = [(t.state, t.action, t.reward, t.next_state, t.done) for t in batch]
-        states, actions, rewards, next_states, dones = map(np.array, zip(*tuples))
+        batch = random.sample(self.buffer, batch_size) #random.sample will return a list of Transition based on batch_size
+        tuples = [(t.state, t.action, t.reward, t.next_state, t.done) for t in batch] # unzip the batch into separate lists
+        states, actions, rewards, next_states, dones = map(np.array, zip(*tuples)) #convert lists to numpy arrays
         return (
             states,
             actions.astype(np.int64),
@@ -42,6 +52,25 @@ class ReplayBuffer:
         return len(self.buffer)
 
 class BaseAgent(ABC):
+    """
+    Base class for DQN and DDQN agents.
+    what it do in detail:
+    1. Initializes the agent with state and action dimensions, hidden layer sizes, optimizer type, loss function, learning rate, and discount factor.
+    2. Sets up the device for computation (GPU if available, otherwise CPU).
+    3. Creates a replay buffer to store experiences.
+    4. Defines abstract methods for optimizing the network, saving, and loading model parameters, which must be implemented by subclasses.
+    5. Provides methods for resetting memory, storing transitions, and selecting actions using an epsilon
+    -greedy policy.
+    Args:
+        state_dim (int): Dimension of the state space.
+        action_dim (int): Dimension of the action space.
+        hidden_dims (tuple): Sizes of hidden layers.
+        optimizer (str): Optimizer type ("adam" or "sgd").
+        loss_fn (callable): Loss function.
+        lr (float): Learning rate.
+        gamma (float): Discount factor.
+        
+    """
     def __init__(self, 
                  state_dim, action_dim, hidden_dims=(128, 128),
                  optimizer="adam", loss_fn=F.mse_loss, lr=1e-3, gamma=0.99):
@@ -95,6 +124,17 @@ class BaseAgent(ABC):
 # DQN network
 # -----------------------------
 class DQN(nn.Module):
+    """
+    Simple feedforward neural network for DQN.
+    what it do in detail:
+    1. Initializes a feedforward neural network with specified input and output dimensions, and hidden layer sizes.
+    2. Constructs the network architecture using linear layers followed by ReLU activation functions.
+    Args:
+        input_dim (int): Dimension of the input state.
+        output_dim (int): Dimension of the output action space.
+        hidden_dims (tuple): Sizes of hidden layers.
+        
+    """
     def __init__(self, input_dim, output_dim, hidden_dims=(128, 128)):
         super(DQN, self).__init__()
         layers = []
@@ -120,7 +160,7 @@ class DQNAgent(BaseAgent):
         super().__init__(state_dim, action_dim, hidden_dims, optimizer, loss_fn, lr, gamma)
         
         # single Q-network
-        self.policy_network = DQN(state_dim, action_dim, hidden_dims).to(self.device)
+        self.policy_network = DQN(state_dim, action_dim, hidden_dims).to(self.device) 
         
         if optimizer == "sgd":
             self.optimizer = torch.optim.SGD(self.policy_network.parameters(), lr=lr)

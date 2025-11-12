@@ -4,7 +4,13 @@ import numpy as np
 import gymnasium as gym
 import wandb
 import math
+import optuna
+import time
+import os
 
+# -------------------------------
+# Train function
+# -------------------------------
 def train(
     env_name: str = "CartPole-v1",
     algo: str = "ddqn",
@@ -26,18 +32,13 @@ def train(
     wandb_project: str = "dqn_project",
     device_str: str = None,
 ):
-    import time
-    import math
-
-    if device_str:
-        device = torch.device(device_str)
-    else:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device(device_str if device_str else "cuda" if torch.cuda.is_available() else "cpu")
 
     # Initialize environment
     env = gym.make(env_name)
     obs, _ = env.reset(seed=seed)
     obs_dim = np.array(obs).flatten().shape[0]
+
     if hasattr(env.action_space, "n"):
         action_dim = env.action_space.n
     else:
@@ -45,37 +46,22 @@ def train(
 
     # Initialize agent
     if algo.lower() == "dqn":
-        agent = DQNAgent(
-            state_dim=obs_dim,
-            action_dim=action_dim,
-            lr=lr,
-            gamma=gamma,
-        )
+        agent = DQNAgent(state_dim=obs_dim, action_dim=action_dim, lr=lr, gamma=gamma)
     elif algo.lower() == "ddqn":
-        agent = DDQNAgent(
-            state_dim=obs_dim,
-            action_dim=action_dim,
-            lr=lr,
-            gamma=gamma,
-            target_update_freq=target_update_freq,
-        )
+        agent = DDQNAgent(state_dim=obs_dim, action_dim=action_dim, lr=lr, gamma=gamma, target_update_freq=target_update_freq)
     else:
         raise ValueError(f"Unsupported algorithm: {algo}")
 
-    # Optional: initialize WandB
+    # Optional WandB
     if use_wandb:
         wandb.init(project=wandb_project, config={
-            "env": env_name,
-            "algo": algo,
-            "lr": lr,
-            "gamma": gamma,
-            "batch_size": batch_size,
-            "replay_size": replay_size,
-            "start_epsilon": start_epsilon,
-            "end_epsilon": end_epsilon,
+            "env": env_name, "algo": algo, "lr": lr, "gamma": gamma,
+            "batch_size": batch_size, "replay_size": replay_size,
+            "start_epsilon": start_epsilon, "end_epsilon": end_epsilon,
             "eps_decay_steps": eps_decay_steps,
         })
 
+    # Epsilon schedule
     def get_epsilon(step):
         return end_epsilon + (start_epsilon - end_epsilon) * math.exp(-1.0 * step / eps_decay_steps)
 
@@ -101,7 +87,6 @@ def train(
             ep_length += 1
             total_steps += 1
 
-            # Train if replay buffer has enough samples
             if len(agent.replay_buffer) > max(min_replay_size, batch_size):
                 agent.optimize_step(batch_size)
 
@@ -111,52 +96,36 @@ def train(
         episode_rewards.append(ep_reward)
         episode_lengths.append(ep_length)
 
-        # Logging
         if use_wandb:
             wandb.log({
-                "episode": episode,
-                "epsilon": epsilon,
-                "reward": ep_reward,
-                "length": ep_length,
+                "episode": episode, "epsilon": epsilon,
+                "reward": ep_reward, "length": ep_length,
             })
 
-        # Evaluation printout
         if episode % eval_every == 0 or episode == episodes:
             avg_reward = np.mean(episode_rewards[-eval_every:])
             avg_length = np.mean(episode_lengths[-eval_every:])
-            print(f"[{episode}/{episodes}] "
-                  f"Avg Reward (last {eval_every}): {avg_reward:.2f} | "
-                  f"Avg Length: {avg_length:.2f} | "
-                  f"Epsilon: {epsilon:.3f}")
-
+            print(f"[{episode}/{episodes}] Avg Reward (last {eval_every}): {avg_reward:.2f} | Avg Length: {avg_length:.2f} | Epsilon: {epsilon:.3f}")
             if use_wandb:
                 wandb.log({"avg_reward": avg_reward, "avg_length": avg_length})
 
     env.close()
     total_time = time.time() - start_time
-    print(f"Training complete in {total_time:.1f}s. "
-          f"Final average reward (last 100): {np.mean(episode_rewards[-100:]):.2f}")
+    print(f"Training complete in {total_time:.1f}s. Final average reward (last 100): {np.mean(episode_rewards[-100:]):.2f}")
 
     if use_wandb:
         wandb.finish()
 
-    # Return for later analysis
     return agent, {
         "rewards": episode_rewards,
         "lengths": episode_lengths,
         "training_time": total_time,
     }
 
-
+# -------------------------------
+# Evaluation
+# -------------------------------
 def evaluate(agent: BaseAgent, env_name: str, episodes: int = 10, max_steps: int = 1000, seed: int = 0):
-    """
-    Evaluate a trained DQN or DDQN agent.
-    Runs the agent in greedy mode (epsilon = 0.0) for given episodes.
-    Returns (mean_reward, list_of_rewards)
-    """
-    import numpy as np
-    import gymnasium as gym
-
     env = gym.make(env_name)
     all_returns = []
 
@@ -164,21 +133,17 @@ def evaluate(agent: BaseAgent, env_name: str, episodes: int = 10, max_steps: int
         state, _ = env.reset(seed=seed + ep)
         ep_reward = 0.0
         for t in range(max_steps):
-            # Greedy action (no exploration)
             action = agent.select_action(state, epsilon=0.0)
             step_result = env.step(action)
-
             if len(step_result) == 5:
                 next_state, reward, terminated, truncated, info = step_result
                 done = terminated or truncated
             else:
                 next_state, reward, done, info = step_result
-
             state = next_state
             ep_reward += reward
             if done:
                 break
-
         all_returns.append(ep_reward)
         print(f"Episode {ep + 1}: return = {ep_reward:.2f}")
 
@@ -187,30 +152,21 @@ def evaluate(agent: BaseAgent, env_name: str, episodes: int = 10, max_steps: int
     print(f"\n✅ Average return over {episodes} episodes: {mean_return:.2f}")
     return mean_return, all_returns
 
+# -------------------------------
+# Record Playback
+# -------------------------------
 def record_playback(agent: BaseAgent, env_name: str, video_dir: str = "./videos", episodes: int = 3, max_steps: int = 1000):
-    """
-    Records videos of a trained agent interacting with the environment.
-    """
-    import gymnasium as gym
-    import os
-
-    # Use gymnasium or fallback to gym
     try:
         from gymnasium.wrappers import RecordVideo
     except ImportError:
         from gym.wrappers import RecordVideo
 
     os.makedirs(video_dir, exist_ok=True)
-
-    # Create environment with an image-producing render_mode when possible.
-    # RecordVideo requires the wrapped env to return images (e.g. via "rgb_array").
     try:
         env = gym.make(env_name, render_mode="rgb_array")
     except TypeError:
-        # gym.make may not accept render_mode in older versions; create default env
         env = gym.make(env_name)
 
-    # If env was created without a render_mode, check metadata and try to recreate.
     if getattr(env, "render_mode", None) is None:
         supported = env.metadata.get("render_modes", []) if hasattr(env, "metadata") else []
         if "rgb_array" in supported:
@@ -218,13 +174,9 @@ def record_playback(agent: BaseAgent, env_name: str, video_dir: str = "./videos"
             env = gym.make(env_name, render_mode="rgb_array")
         else:
             env.close()
-            raise ValueError(
-                "Environment does not support an image render mode required by RecordVideo. "
-                "Initialize your environment with a render_mode that returns an image, such as 'rgb_array'."
-            )
+            raise ValueError("Environment must support image render mode 'rgb_array'.")
 
     env = RecordVideo(env, video_folder=video_dir, episode_trigger=lambda ep: True)
-
     print(f"🎥 Recording {episodes} episode(s) to: {os.path.abspath(video_dir)}")
 
     for ep in range(episodes):
@@ -248,14 +200,202 @@ def record_playback(agent: BaseAgent, env_name: str, video_dir: str = "./videos"
     print(f"🎬 Videos saved in: {os.path.abspath(video_dir)}")
 
 
+# -------------------------------
+# Environment-specific Optuna objective
+# -------------------------------
+def objective(trial, env_name):
+
+    # Environment-specific ranges
+    if env_name == "CartPole-v1":
+        lr = trial.suggest_float("lr", 1e-4, 5e-3, log=True)
+        gamma = trial.suggest_float("gamma", 0.90, 0.999)
+        batch_size = trial.suggest_int("batch_size", 32, 128, step=32)
+        replay_size = trial.suggest_int("replay_size", 10_000, 50_000, step=10_000)
+        min_replay_size = trial.suggest_int("min_replay_size", 500, 1000, step=500)
+        eps_decay_steps = trial.suggest_int("eps_decay_steps", 5000, 15_000)
+        episodes = trial.suggest_int("episodes", 150, 300, step=50)
+    elif env_name == "Acrobot-v1":
+        lr = trial.suggest_float("lr", 1e-4, 5e-3, log=True)
+        gamma = trial.suggest_float("gamma", 0.98, 0.999)
+        batch_size = trial.suggest_int("batch_size", 64, 256, step=64)
+        replay_size = trial.suggest_int("replay_size", 50_000, 100_000, step=10_000)
+        min_replay_size = trial.suggest_int("min_replay_size", 2000, 5000, step=500)
+        eps_decay_steps = trial.suggest_int("eps_decay_steps", 30_000, 80_000)
+        episodes = trial.suggest_int("episodes", 400, 800, step=50)
+    elif env_name == "MountainCar-v0":
+        lr = trial.suggest_float("lr", 1e-4, 5e-3, log=True)
+        gamma = trial.suggest_float("gamma", 0.98, 0.999)
+        batch_size = trial.suggest_int("batch_size", 64, 256, step=64)
+        replay_size = trial.suggest_int("replay_size", 100_000, 250_000, step=10_000)
+        min_replay_size = trial.suggest_int("min_replay_size", 5000, 10000, step=500)
+        eps_decay_steps = trial.suggest_int("eps_decay_steps", 50_000, 150_000)
+        episodes = trial.suggest_int("episodes", 800, 1500, step=100)
+    else:
+        raise ValueError(f"Unsupported environment: {env_name}")
+
+    agent, _ = train(
+        env_name=env_name,
+        algo="ddqn",
+        episodes=episodes,
+        lr=lr,
+        gamma=gamma,
+        batch_size=batch_size,
+        replay_size=replay_size,
+        min_replay_size=min_replay_size,
+        eps_decay_steps=eps_decay_steps,
+        use_wandb=False
+    )
+
+    mean_reward, _ = evaluate(agent, env_name=env_name, episodes=10)
+    return mean_reward
+
+# -------------------------------
+# Tune and train for one environment
+# -------------------------------
+def tune_and_train(env_name, n_trials=20):
+    print(f"\n--- Tuning hyperparameters for {env_name} ---\n")
+    study = optuna.create_study(direction="maximize")
+    study.optimize(lambda trial: objective(trial, env_name), n_trials=n_trials)
+
+    best_params = study.best_trial.params
+    print(f"\n Best hyperparameters for {env_name}: {best_params}\n")
+
+    # Train final agent with best hyperparameters
+    agent, stats = train(
+        env_name=env_name,
+        algo="ddqn",
+        episodes=best_params.get("episodes", 300),
+        lr=best_params["lr"],
+        gamma=best_params["gamma"],
+        batch_size=best_params["batch_size"],
+        replay_size=best_params["replay_size"],
+        min_replay_size=best_params.get("min_replay_size", 1000),
+        eps_decay_steps=best_params["eps_decay_steps"],
+        use_wandb=True
+    )
+
+    # Evaluate and record
+    evaluate(agent, env_name=env_name, episodes=100)
+    record_playback(agent, env_name=env_name, video_dir=f"./videos_{env_name}", episodes=2)
+
+# -------------------------------
+# Run tuning for each environment
+# -------------------------------
 if __name__ == "__main__":
-    from dqn import DQNAgent, DDQNAgent
+    envs = ["CartPole-v1", "Acrobot-v1", "MountainCar-v0"]
+    for env_name in envs:
+        tune_and_train(env_name, n_trials=20)  # increase n_trials for more exhaustive search
 
-    # Train
-    agent, stats = train(env_name="CartPole-v1", algo="ddqn", episodes=300, use_wandb=False)
 
-    # Evaluate
-    evaluate(agent, env_name="CartPole-v1", episodes=10)
+# -------------------------------
+# Optuna Hyperparameter Optimization
+# -------------------------------
+# def objective(trial, env_name):
+#     gamma = trial.suggest_float("gamma", 0.90, 0.999)
+#     eps_decay_steps = trial.suggest_int("eps_decay_steps", 5000, 50000)
+#     lr = trial.suggest_float("lr", 1e-4, 5e-3, log=True)
+#     replay_size = trial.suggest_int("replay_size", 10_000, 200_000, step=10_000)
+#     batch_size = trial.suggest_int("batch_size", 32, 128, step=32)
 
-    # Record video
-    record_playback(agent, env_name="CartPole-v1", video_dir="./videos_ddqn", episodes=2)
+#     agent, stats = train(
+#         env_name=env_name,
+#         algo="ddqn",
+#         episodes=150,  # shorter for tuning
+#         lr=lr,
+#         gamma=gamma,
+#         batch_size=batch_size,
+#         replay_size=replay_size,
+#         eps_decay_steps=eps_decay_steps,
+#         use_wandb=False
+#     )
+
+#     mean_reward, _ = evaluate(agent, env_name=env_name, episodes=10)
+#     return mean_reward
+
+# -------------------------------
+# Main: tune, train final, evaluate, record
+# -------------------------------
+# if __name__ == "__main__":
+#     envs = ["CartPole-v1", "Acrobot-v1", "MountainCar-v0"]
+#     for env_name in envs:
+#         print(f"\n--- Tuning hyperparameters for {env_name} ---\n")
+#         study = optuna.create_study(direction="maximize")
+#         study.optimize(lambda trial: objective(trial, env_name), n_trials=15)
+
+#         print(f"Best trial for {env_name}: {study.best_trial.params}")
+
+#         # Train final agent with best hyperparameters
+#         best_params = study.best_trial.params
+#         agent, stats = train(
+#             env_name=env_name,
+#             algo="ddqn",
+#             episodes=300,
+#             lr=best_params["lr"],
+#             gamma=best_params["gamma"],
+#             batch_size=best_params["batch_size"],
+#             replay_size=best_params["replay_size"],
+#             eps_decay_steps=best_params["eps_decay_steps"],
+#             use_wandb=True
+#         )
+
+#         evaluate(agent, env_name=env_name, episodes=100)
+#         record_playback(agent, env_name=env_name, video_dir=f"./videos_{env_name}", episodes=2)
+
+
+# -------------------------------
+# Main: train with predefined best hyperparameters
+# -------------------------------
+# if __name__ == "__main__":
+#     # Best parameters obtained from previous Optuna runs
+#     best_params_per_env = {
+#         "CartPole-v1": {
+#             "lr": 0.0002207,
+#             "gamma": 0.9753,
+#             "batch_size": 128,
+#             "replay_size": 80_000,
+#             "eps_decay_steps": 22_493,
+#             "episodes": 400,       # more suitable for CartPole
+#             "min_replay_size": 1_000
+#         },
+    
+#         "Acrobot-v1": {
+#             "lr": 0.001662,
+#             "gamma": 0.96978,
+#             "batch_size": 96,
+#             "replay_size": 120_000,
+#             "eps_decay_steps": 43_033,
+#             "episodes": 2000,      # need longer training
+#             "min_replay_size": 10_000
+#         },
+#         "MountainCar-v0": {
+#             "lr": 0.000232,
+#             "gamma": 0.9665,
+#             "batch_size": 128,
+#             "replay_size": 170_000,
+#             "eps_decay_steps": 13_300,
+#             "episodes": 2000,      # also needs longer training
+#             "min_replay_size": 10_000
+#         },
+#     }
+
+#     for env_name, params in best_params_per_env.items():
+#         print(f"\n--- Training {env_name} with best parameters ---\n")
+        
+#         agent, stats = train(
+#             env_name=env_name,
+#             algo="ddqn",
+#             episodes=params["episodes"],  
+#             lr=params["lr"],
+#             gamma=params["gamma"],
+#             batch_size=params["batch_size"],
+#             replay_size=params["replay_size"],
+#             eps_decay_steps=params["eps_decay_steps"],
+#             min_replay_size=params["min_replay_size"],
+#             use_wandb=True
+#         )
+
+#         # Evaluate on 100 episodes
+#         evaluate(agent, env_name=env_name, episodes=100)
+
+#         # Record a few episodes
+#         record_playback(agent, env_name=env_name, video_dir=f"./videos_{env_name}", episodes=2)
