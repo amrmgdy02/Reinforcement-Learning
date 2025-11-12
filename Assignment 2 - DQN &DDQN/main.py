@@ -199,112 +199,49 @@ def record_playback(agent: BaseAgent, env_name: str, video_dir: str = "./videos"
     env.close()
     print(f"🎬 Videos saved in: {os.path.abspath(video_dir)}")
 
-
-# -------------------------------
-# Environment-specific Optuna objective
-# -------------------------------
-def objective(trial, env_name):
-
-    # Environment-specific ranges
-    if env_name == "CartPole-v1":
-        lr = trial.suggest_float("lr", 1e-4, 5e-3, log=True)
-        gamma = trial.suggest_float("gamma", 0.90, 0.999)
-        batch_size = trial.suggest_int("batch_size", 32, 128, step=32)
-        replay_size = trial.suggest_int("replay_size", 10_000, 50_000, step=10_000)
-        min_replay_size = trial.suggest_int("min_replay_size", 500, 1000, step=500)
-        eps_decay_steps = trial.suggest_int("eps_decay_steps", 5000, 15_000)
-        episodes = trial.suggest_int("episodes", 150, 300, step=50)
-    elif env_name == "Acrobot-v1":
-        lr = trial.suggest_float("lr", 1e-4, 5e-3, log=True)
-        gamma = trial.suggest_float("gamma", 0.98, 0.999)
-        batch_size = trial.suggest_int("batch_size", 64, 256, step=64)
-        replay_size = trial.suggest_int("replay_size", 50_000, 100_000, step=10_000)
-        min_replay_size = trial.suggest_int("min_replay_size", 2000, 5000, step=500)
-        eps_decay_steps = trial.suggest_int("eps_decay_steps", 30_000, 80_000)
-        episodes = trial.suggest_int("episodes", 400, 800, step=50)
-    elif env_name == "MountainCar-v0":
-        lr = trial.suggest_float("lr", 1e-4, 5e-3, log=True)
-        gamma = trial.suggest_float("gamma", 0.98, 0.999)
-        batch_size = trial.suggest_int("batch_size", 64, 256, step=64)
-        replay_size = trial.suggest_int("replay_size", 100_000, 250_000, step=10_000)
-        min_replay_size = trial.suggest_int("min_replay_size", 5000, 10000, step=500)
-        eps_decay_steps = trial.suggest_int("eps_decay_steps", 50_000, 150_000)
-        episodes = trial.suggest_int("episodes", 800, 1500, step=100)
-    else:
-        raise ValueError(f"Unsupported environment: {env_name}")
-
-    agent, _ = train(
-        env_name=env_name,
-        algo="ddqn",
-        episodes=episodes,
-        lr=lr,
-        gamma=gamma,
-        batch_size=batch_size,
-        replay_size=replay_size,
-        min_replay_size=min_replay_size,
-        eps_decay_steps=eps_decay_steps,
-        use_wandb=False
-    )
-
-    mean_reward, _ = evaluate(agent, env_name=env_name, episodes=10)
-    return mean_reward
-
-# -------------------------------
-# Tune and train for one environment
-# -------------------------------
-def tune_and_train(env_name, n_trials=20):
-    print(f"\n--- Tuning hyperparameters for {env_name} ---\n")
-    study = optuna.create_study(direction="maximize")
-    study.optimize(lambda trial: objective(trial, env_name), n_trials=n_trials)
-
-    best_params = study.best_trial.params
-    print(f"\n Best hyperparameters for {env_name}: {best_params}\n")
-
-    # Train final agent with best hyperparameters
-    agent, stats = train(
-        env_name=env_name,
-        algo="ddqn",
-        episodes=best_params.get("episodes", 300),
-        lr=best_params["lr"],
-        gamma=best_params["gamma"],
-        batch_size=best_params["batch_size"],
-        replay_size=best_params["replay_size"],
-        min_replay_size=best_params.get("min_replay_size", 1000),
-        eps_decay_steps=best_params["eps_decay_steps"],
-        use_wandb=True
-    )
-
-    # Evaluate and record
-    evaluate(agent, env_name=env_name, episodes=100)
-    record_playback(agent, env_name=env_name, video_dir=f"./videos_{env_name}", episodes=2)
-
-# -------------------------------
-# Run tuning for each environment
-# -------------------------------
-if __name__ == "__main__":
-    envs = ["CartPole-v1", "Acrobot-v1", "MountainCar-v0"]
-    for env_name in envs:
-        tune_and_train(env_name, n_trials=20)  # increase n_trials for more exhaustive search
-
-
-# -------------------------------
-# Optuna Hyperparameter Optimization
-# -------------------------------
+################################################################
+# # -------------------------------
+# # Environment-specific Optuna objective
+# # -------------------------------
 # def objective(trial, env_name):
-#     gamma = trial.suggest_float("gamma", 0.90, 0.999)
-#     eps_decay_steps = trial.suggest_int("eps_decay_steps", 5000, 50000)
-#     lr = trial.suggest_float("lr", 1e-4, 5e-3, log=True)
-#     replay_size = trial.suggest_int("replay_size", 10_000, 200_000, step=10_000)
-#     batch_size = trial.suggest_int("batch_size", 32, 128, step=32)
 
-#     agent, stats = train(
+#     # Environment-specific ranges
+#     if env_name == "CartPole-v1":
+#         lr = trial.suggest_float("lr", 1e-4, 5e-3, log=True)
+#         gamma = trial.suggest_float("gamma", 0.90, 0.999)
+#         batch_size = trial.suggest_int("batch_size", 32, 128, step=32)
+#         replay_size = trial.suggest_int("replay_size", 10_000, 50_000, step=10_000)
+#         min_replay_size = trial.suggest_int("min_replay_size", 500, 1000, step=500)
+#         eps_decay_steps = trial.suggest_int("eps_decay_steps", 5000, 15_000)
+#         episodes = trial.suggest_int("episodes", 150, 300, step=50)
+#     elif env_name == "Acrobot-v1":
+#         lr = trial.suggest_float("lr", 1e-4, 5e-3, log=True)
+#         gamma = trial.suggest_float("gamma", 0.98, 0.999)
+#         batch_size = trial.suggest_int("batch_size", 64, 256, step=64)
+#         replay_size = trial.suggest_int("replay_size", 50_000, 100_000, step=10_000)
+#         min_replay_size = trial.suggest_int("min_replay_size", 2000, 5000, step=500)
+#         eps_decay_steps = trial.suggest_int("eps_decay_steps", 30_000, 80_000)
+#         episodes = trial.suggest_int("episodes", 400, 800, step=50)
+#     elif env_name == "MountainCar-v0":
+#         lr = trial.suggest_float("lr", 1e-4, 5e-3, log=True)
+#         gamma = trial.suggest_float("gamma", 0.98, 0.999)
+#         batch_size = trial.suggest_int("batch_size", 64, 256, step=64)
+#         replay_size = trial.suggest_int("replay_size", 100_000, 250_000, step=10_000)
+#         min_replay_size = trial.suggest_int("min_replay_size", 5000, 10000, step=500)
+#         eps_decay_steps = trial.suggest_int("eps_decay_steps", 50_000, 150_000)
+#         episodes = trial.suggest_int("episodes", 800, 1500, step=100)
+#     else:
+#         raise ValueError(f"Unsupported environment: {env_name}")
+
+#     agent, _ = train(
 #         env_name=env_name,
 #         algo="ddqn",
-#         episodes=150,  # shorter for tuning
+#         episodes=episodes,
 #         lr=lr,
 #         gamma=gamma,
 #         batch_size=batch_size,
 #         replay_size=replay_size,
+#         min_replay_size=min_replay_size,
 #         eps_decay_steps=eps_decay_steps,
 #         use_wandb=False
 #     )
@@ -312,90 +249,103 @@ if __name__ == "__main__":
 #     mean_reward, _ = evaluate(agent, env_name=env_name, episodes=10)
 #     return mean_reward
 
-# -------------------------------
-# Main: tune, train final, evaluate, record
-# -------------------------------
+# # -------------------------------
+# # Tune and train for one environment
+# # -------------------------------
+# def tune_and_train(env_name, n_trials=20):
+#     print(f"\n--- Tuning hyperparameters for {env_name} ---\n")
+#     study = optuna.create_study(direction="maximize")
+#     study.optimize(lambda trial: objective(trial, env_name), n_trials=n_trials)
+
+#     best_params = study.best_trial.params
+#     print(f"\n Best hyperparameters for {env_name}: {best_params}\n")
+
+#     # Train final agent with best hyperparameters
+#     agent, stats = train(
+#         env_name=env_name,
+#         algo="ddqn",
+#         episodes=best_params.get("episodes", 300),
+#         lr=best_params["lr"],
+#         gamma=best_params["gamma"],
+#         batch_size=best_params["batch_size"],
+#         replay_size=best_params["replay_size"],
+#         min_replay_size=best_params.get("min_replay_size", 1000),
+#         eps_decay_steps=best_params["eps_decay_steps"],
+#         use_wandb=True
+#     )
+
+#     # Evaluate and record
+#     evaluate(agent, env_name=env_name, episodes=100)
+#     record_playback(agent, env_name=env_name, video_dir=f"./videos_{env_name}", episodes=2)
+
+# # -------------------------------
+# # Run tuning for each environment
+# # -------------------------------
 # if __name__ == "__main__":
 #     envs = ["CartPole-v1", "Acrobot-v1", "MountainCar-v0"]
 #     for env_name in envs:
-#         print(f"\n--- Tuning hyperparameters for {env_name} ---\n")
-#         study = optuna.create_study(direction="maximize")
-#         study.optimize(lambda trial: objective(trial, env_name), n_trials=15)
+#         tune_and_train(env_name, n_trials=20)  # increase n_trials for more exhaustive search
 
-#         print(f"Best trial for {env_name}: {study.best_trial.params}")
-
-#         # Train final agent with best hyperparameters
-#         best_params = study.best_trial.params
-#         agent, stats = train(
-#             env_name=env_name,
-#             algo="ddqn",
-#             episodes=300,
-#             lr=best_params["lr"],
-#             gamma=best_params["gamma"],
-#             batch_size=best_params["batch_size"],
-#             replay_size=best_params["replay_size"],
-#             eps_decay_steps=best_params["eps_decay_steps"],
-#             use_wandb=True
-#         )
-
-#         evaluate(agent, env_name=env_name, episodes=100)
-#         record_playback(agent, env_name=env_name, video_dir=f"./videos_{env_name}", episodes=2)
+#######################################################################
 
 
-# -------------------------------
+
 # Main: train with predefined best hyperparameters
 # -------------------------------
-# if __name__ == "__main__":
-#     # Best parameters obtained from previous Optuna runs
-#     best_params_per_env = {
-#         "CartPole-v1": {
-#             "lr": 0.0002207,
-#             "gamma": 0.9753,
-#             "batch_size": 128,
-#             "replay_size": 80_000,
-#             "eps_decay_steps": 22_493,
-#             "episodes": 400,       # more suitable for CartPole
-#             "min_replay_size": 1_000
-#         },
-    
-#         "Acrobot-v1": {
-#             "lr": 0.001662,
-#             "gamma": 0.96978,
-#             "batch_size": 96,
-#             "replay_size": 120_000,
-#             "eps_decay_steps": 43_033,
-#             "episodes": 2000,      # need longer training
-#             "min_replay_size": 10_000
-#         },
-#         "MountainCar-v0": {
-#             "lr": 0.000232,
-#             "gamma": 0.9665,
-#             "batch_size": 128,
-#             "replay_size": 170_000,
-#             "eps_decay_steps": 13_300,
-#             "episodes": 2000,      # also needs longer training
-#             "min_replay_size": 10_000
-#         },
-#     }
+if __name__ == "__main__":
+    # Best parameters obtained from previous Optuna runs
+    best_params_per_env = {
 
-#     for env_name, params in best_params_per_env.items():
-#         print(f"\n--- Training {env_name} with best parameters ---\n")
+        "CartPole-v1": {
+            "lr": 0.0000677,  
+            "gamma": 0.9921,
+            "batch_size": 32,
+            "replay_size": 20_000,
+            "eps_decay_steps": 14_690,
+            "episodes": 300,       # more suitable for CartPole
+            "min_replay_size": 1_000
+        },
+
+        "Acrobot-v1": {
+            "lr": 0.000575,
+            "gamma": 0.9959,
+            "batch_size": 256,
+            "replay_size": 100_000,
+            "eps_decay_steps": 57_279,
+            "episodes": 450,
+            "min_replay_size": 3_000
+        },
         
-#         agent, stats = train(
-#             env_name=env_name,
-#             algo="ddqn",
-#             episodes=params["episodes"],  
-#             lr=params["lr"],
-#             gamma=params["gamma"],
-#             batch_size=params["batch_size"],
-#             replay_size=params["replay_size"],
-#             eps_decay_steps=params["eps_decay_steps"],
-#             min_replay_size=params["min_replay_size"],
-#             use_wandb=True
-#         )
 
-#         # Evaluate on 100 episodes
-#         evaluate(agent, env_name=env_name, episodes=100)
+        "MountainCar-v0": {
+            "lr": 0.000607,
+            "gamma": 0.9987,
+            "batch_size": 192,
+            "replay_size": 200_000,
+            "eps_decay_steps": 109_556,
+            "episodes": 1300,
+            "min_replay_size": 7_000
+        },
+    }
 
-#         # Record a few episodes
-#         record_playback(agent, env_name=env_name, video_dir=f"./videos_{env_name}", episodes=2)
+    for env_name, params in best_params_per_env.items():
+        print(f"\n--- Training {env_name} with best parameters ---\n")
+        
+        agent, stats = train(
+            env_name=env_name,
+            algo="ddqn",
+            episodes=params["episodes"],  
+            lr=params["lr"],
+            gamma=params["gamma"],
+            batch_size=params["batch_size"],
+            replay_size=params["replay_size"],
+            eps_decay_steps=params["eps_decay_steps"],
+            min_replay_size=params["min_replay_size"],
+            use_wandb=True
+        )
+
+        # Evaluate on 100 episodes
+        evaluate(agent, env_name=env_name, episodes=100)
+
+        # Record a few episodes
+        record_playback(agent, env_name=env_name, video_dir=f"./videos_{env_name}", episodes=2)

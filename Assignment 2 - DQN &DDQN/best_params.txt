@@ -9,3 +9,34 @@ Best is trial 3 with value: -125.6. Best trial for Acrobot-v1:
 Best is trial 0 with value: -200.0. Best trial for MountainCar-v0:
  {'gamma': 0.9665389674887084, 'eps_decay_steps': 13300, 'lr': 0.00023207050033482754,
   'replay_size': 170000, 'batch_size': 128}
+
+
+
+test 2
+
+Best is trial 15 with value: -75.3.
+
+ Best hyperparameters for Acrobot-v1:
+  {'lr': 0.0005751051408874448, 'gamma': 0.9959023210939401, 'batch_size': 256,
+   'replay_size': 100000,'min_replay_size': 3000, 'eps_decay_steps': 57279, 'episodes': 450}
+
+Best hyperparameters for MountainCar-v0:
+Trial 0 finished with value: -112.7 and parameters: {'lr': 0.0008313011752495012,
+ 'gamma': 0.9871414328412926, 'batch_size': 256, 'replay_size': 130000,
+  'min_replay_size': 7000, 'eps_decay_steps': 113504, 'episodes': 900}
+  . Best is trial 0 with value: -112.7.
+
+Trial 17 finished with value: -104.4 and parameters: {'lr': 0.0006551530307390377,
+ 'gamma': 0.993919675289232, 'batch_size': 192, 'replay_size': 170000, 'min_replay_size': 8000,
+  'eps_decay_steps': 106853, 'episodes': 1100}.
+   Best is trial 17 with value: -104.4.
+
+Trial 18 finished with value: -101.3 and parameters: {'lr': 0.0006070534690087694,
+ 'gamma': 0.9986929106645476, 'batch_size': 192, 'replay_size': 200000,
+  'min_replay_size': 7000, 'eps_decay_steps': 109556, 'episodes': 1300}.
+   Best is trial 18 with value: -101.3.
+
+Best hyperparameters for CartPole-v1: 
+Best is trial 7 with value: 422.9.
+{'lr': 6.77747056846666e-05, 'gamma': 0.9920673648047162, 'batch_size': 32,
+ 'replay_size': 20000, 'min_replay_size': 1000, 'eps_decay_steps': 14690, 'episodes': 300}
