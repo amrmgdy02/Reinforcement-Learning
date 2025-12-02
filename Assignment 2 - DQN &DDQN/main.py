@@ -596,8 +596,34 @@ def record_playback(
 #         tune_and_train(env_name, n_trials=20)  # increase n_trials for more exhaustive search
 
 #######################################################################
+def save_model(agent: BaseAgent, env_name: str, algo: str = "ddqn"):
+    if algo.lower() == "ddqn":
+        model_dir = "./saved_models"
+    else:
+        model_dir = "./saved_models/dqn"
+    os.makedirs(model_dir, exist_ok=True)
+    model_path = os.path.join(model_dir, f"{env_name}_{algo.lower()}.pth")
+    agent.save(model_path)
+    print(f"Model saved at {model_path}")
 
+def load_saved_model(env_name: str, algo: str = "ddqn") -> BaseAgent:
+    env = make_env(env_name)
+    state_dim = env.observation_space.shape[0]
+    action_dim = env.action_space.n
 
+    if algo.lower() == "dqn":
+        agent = DQNAgent(state_dim=state_dim, action_dim=action_dim)
+    elif algo.lower() == "ddqn":
+        agent = DDQNAgent(state_dim=state_dim, action_dim=action_dim)
+    else:
+        raise ValueError(f"Unsupported algorithm: {algo}")
+    if algo.lower() == "ddqn":
+        model_dir = "./saved_models"
+    else:
+        model_dir = "./saved_models/dqn"
+    model_path = os.path.join(model_dir, f"{env_name}_{algo.lower()}.pth")
+    agent.load(model_path)  # only base path; loads policy and target internally
+    return agent
 
 # Main: train with predefined best hyperparameters
 # -------------------------------
@@ -649,13 +675,12 @@ if __name__ == "__main__":
 
     for env_name, params in best_params_per_env.items():
         print(f"\n--- Training {env_name} with best parameters ---\n")
-
-        # Train both DQN and DDQN in the same run
-        results_train = train_agents(
+        
+        agent, stats = train(
             env_name=env_name,
-            episodes=params["episodes"],
+            algo="ddqn",
+            episodes=params["episodes"],  
             lr=params["lr"],
-            hidden_dims=params.get("hidden_dims", (128, 128)),
             gamma=params["gamma"],
             batch_size=params["batch_size"],
             replay_size=params["replay_size"],
@@ -664,25 +689,19 @@ if __name__ == "__main__":
             use_wandb=True
         )
 
-        # Evaluate both agents in the same run
-        results_eval = evaluate_agents(
-            agents={algo: results_train[algo]["agent"] for algo in results_train},
-            env_name=env_name,
-            use_wandb=True,
-            episodes=100
-        )
+        # Evaluate on 100 episodes and get durations
+        mean_reward, all_rewards, episode_lengths = evaluate(agent, env_name=env_name, episodes=100)
 
-        # Record a few episodes for each agent
-        for algo, data in results_train.items():
-            # results_train stores a dict per algorithm with keys: 'agent', 'rewards', etc.
-            agent = data["agent"]
-            experiment_name = f"{algo}_{env_name}_{len(params.get('hidden_dims', (128, 128)))}_layers_lr{params['lr']}"
-            record_playback(
-                agent,
-                env_name=env_name,
-                video_dir=f"./videos_{env_name}",
-                file_name=experiment_name,
-                episodes=2
-            )
+        # Plot episode durations to show stability
+        import matplotlib.pyplot as plt
 
+        plt.figure(figsize=(10,5))
+        plt.plot(episode_lengths)
+        plt.xlabel("Episode")
+        plt.ylabel("Episode Duration (steps)")
+        plt.title(f"Episode Durations for {env_name}")
+        plt.show()
+
+        # Record a few episodes
+        record_playback(agent, env_name=env_name, video_dir=f"./videos_{env_name}", episodes=2)
 

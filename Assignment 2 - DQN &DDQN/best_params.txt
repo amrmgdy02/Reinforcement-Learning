@@ -47,3 +47,14 @@ Trial 11 finished with value: -131.6055433535328 and parameters:
  {'lr': 0.00015547872665148672, 'gamma': 0.9781448066613916, 'batch_size': 256,
   'replay_size': 250000, 'min_replay_size': 6000, 'eps_decay_steps': 22391, 'episodes': 800}
   . Best is trial 11 with value: -131.6055433535328.
+
+
+
+Notes
+CartPole-v1: Smaller batch sizes and lower learning rate worked best in the final test. Reward is high and training is stable.
+
+Acrobot-v1: Larger batch size and slightly lower learning rate gave best results (-75.3). Reward improved from initial trial.
+
+MountainCar-v0: Performance improved gradually as γ increased and replay size/batch size were optimized.
+
+Pendulum-v1: Optimal combination uses medium γ (~0.978), high replay size, and 256 batch size. Trial 11 gave best reward.
