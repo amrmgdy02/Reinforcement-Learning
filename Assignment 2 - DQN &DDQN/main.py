@@ -7,6 +7,11 @@ import math
 import optuna
 import time
 import os
+import matplotlib.pyplot as plt
+try:
+    from gymnasium.wrappers import RecordVideo
+except ImportError:
+    from gym.wrappers import RecordVideo
 
 # -------------------------------
 # Discretize continuous actions
@@ -45,6 +50,7 @@ def train(
     algo: str = "ddqn",
     episodes: int = 400,
     max_steps_per_episode: int = 1000,
+    hidden_dims: tuple = (128, 128),
     lr: float = 1e-3,
     gamma: float = 0.99,
     batch_size: int = 64,
@@ -54,11 +60,10 @@ def train(
     eps_decay_steps: int = 30000,
     target_update_freq: int = 1000,
     min_replay_size: int = 1000,
-    eval_every: int = 25,
-    eval_episodes: int = 5,
+    eval_every: int = 50,
     seed: int = 42,
     use_wandb: bool = False,
-    wandb_project: str = "dqn_project",
+    wandb_project: str = "rl_assignment",
     device_str: str = None,
 ):
     device = torch.device(device_str if device_str else "cuda" if torch.cuda.is_available() else "cpu")
@@ -75,15 +80,17 @@ def train(
 
     # Initialize agent
     if algo.lower() == "dqn":
-        agent = DQNAgent(state_dim=obs_dim, action_dim=action_dim, lr=lr, gamma=gamma)
+        agent = DQNAgent(state_dim=obs_dim, action_dim=action_dim, hidden_dims=hidden_dims, lr=lr, gamma=gamma)
     elif algo.lower() == "ddqn":
-        agent = DDQNAgent(state_dim=obs_dim, action_dim=action_dim, lr=lr, gamma=gamma, target_update_freq=target_update_freq)
+        agent = DDQNAgent(state_dim=obs_dim, action_dim=action_dim, hidden_dims=hidden_dims, lr=lr, gamma=gamma, target_update_freq=target_update_freq)
     else:
         raise ValueError(f"Unsupported algorithm: {algo}")
 
     # Optional WandB
     if use_wandb:
-        wandb.init(project=wandb_project, config={
+        wandb.init(project=wandb_project, 
+                   name=f"train_{algo}_{env_name}_{len(hidden_dims)}_layers_lr{lr}", 
+                   config={
             "env": env_name, "algo": algo, "lr": lr, "gamma": gamma,
             "batch_size": batch_size, "replay_size": replay_size,
             "start_epsilon": start_epsilon, "end_epsilon": end_epsilon,
@@ -97,12 +104,14 @@ def train(
     total_steps = 0
     episode_rewards = []
     episode_lengths = []
+    episode_durations = []
     start_time = time.time()
 
     for episode in range(1, episodes + 1):
         state, _ = env.reset(seed=seed + episode)
         ep_reward = 0
         ep_length = 0
+        ep_start_time = time.time()
 
         for t in range(max_steps_per_episode):
             epsilon = get_epsilon(total_steps)
@@ -121,7 +130,8 @@ def train(
 
             if done:
                 break
-
+        ep_duration = time.time() - ep_start_time
+        episode_durations.append(ep_duration)
         episode_rewards.append(ep_reward)
         episode_lengths.append(ep_length)
 
@@ -129,6 +139,7 @@ def train(
             wandb.log({
                 "episode": episode, "epsilon": epsilon,
                 "reward": ep_reward, "length": ep_length,
+                "duration": ep_duration,
             })
 
         if episode % eval_every == 0 or episode == episodes:
@@ -141,6 +152,9 @@ def train(
     env.close()
     total_time = time.time() - start_time
     print(f"Training complete in {total_time:.1f}s. Final average reward (last 100): {np.mean(episode_rewards[-100:]):.2f}")
+    # log avg reward over last 100 episodes to wandb
+    if use_wandb:
+        wandb.log({"final_avg_reward_100": np.mean(episode_rewards[-100:])})
 
     if use_wandb:
         wandb.finish()
@@ -150,56 +164,309 @@ def train(
         "lengths": episode_lengths,
         "training_time": total_time,
     }
+    
+    
+def train_agents(
+    env_name: str = "CartPole-v1",
+    episodes: int = 400,
+    max_steps_per_episode: int = 1000,
+    hidden_dims: tuple = (128, 128),
+    lr: float = 1e-3,
+    gamma: float = 0.99,
+    batch_size: int = 64,
+    replay_size: int = 100_000,
+    start_epsilon: float = 1.0,
+    end_epsilon: float = 0.02,
+    eps_decay_steps: int = 30000,
+    target_update_freq: int = 1000,
+    min_replay_size: int = 1000,
+    eval_every: int = 50,
+    seed: int = 42,
+    use_wandb: bool = False,
+    wandb_project: str = "rl_assignment",
+    device_str: str = None,
+):
+    """Train both DQN and DDQN agents on the same environment in a single wandb run."""
+
+    algorithms = ["dqn", "ddqn"]
+    results = {}
+
+    device = torch.device(device_str if device_str else "cuda" if torch.cuda.is_available() else "cpu")
+
+    # Optional WandB (one run for both agents)
+    if use_wandb:
+        wandb.init(
+            project=wandb_project,
+            name=f"compare_DQN_DDQN_{env_name}_{len(hidden_dims)}layers_lr{lr}",
+            config={
+                "env": env_name, "lr": lr, "gamma": gamma,
+                "batch_size": batch_size, "replay_size": replay_size,
+                "start_epsilon": start_epsilon, "end_epsilon": end_epsilon,
+                "eps_decay_steps": eps_decay_steps, "hidden_dims": hidden_dims
+            }
+        )
+
+    for algo in algorithms:
+        # Initialize environment
+        env = make_env(env_name)
+        obs, _ = env.reset(seed=seed)
+        obs_dim = np.array(obs).flatten().shape[0]
+        action_dim = env.action_space.n
+
+        # Initialize agent
+        if algo == "dqn":
+            agent = DQNAgent(state_dim=obs_dim, action_dim=action_dim, hidden_dims=hidden_dims, lr=lr, gamma=gamma)
+        else:  # ddqn
+            agent = DDQNAgent(state_dim=obs_dim, action_dim=action_dim, hidden_dims=hidden_dims,
+                              lr=lr, gamma=gamma, target_update_freq=target_update_freq)
+
+        # Training loop
+        total_steps = 0
+        episode_rewards, episode_lengths, episode_durations = [], [], []
+        start_time = time.time()
+
+        def get_epsilon(step):
+            return end_epsilon + (start_epsilon - end_epsilon) * math.exp(-1.0 * step / eps_decay_steps)
+
+        for episode in range(1, episodes + 1):
+            state, _ = env.reset(seed=seed + episode)
+            ep_reward, ep_length = 0, 0
+            ep_start_time = time.time()
+
+            for t in range(max_steps_per_episode):
+                epsilon = get_epsilon(total_steps)
+                action = agent.select_action(state, epsilon)
+                next_state, reward, terminated, truncated, info = env.step(action)
+                done = terminated or truncated
+                agent.store_transition(state, action, reward, next_state, float(done))
+                state = next_state
+                ep_reward += reward
+                ep_length += 1
+                total_steps += 1
+
+                if len(agent.replay_buffer) > max(min_replay_size, batch_size):
+                    agent.optimize_step(batch_size)
+
+                if done:
+                    break
+
+            ep_duration = time.time() - ep_start_time
+            episode_durations.append(ep_duration)
+            episode_rewards.append(ep_reward)
+            episode_lengths.append(ep_length)
+
+            # Log per-episode metrics to wandb with algorithm name
+            if use_wandb:
+                wandb.log({
+                    f"{algo}/episode": episode,
+                    f"{algo}/epsilon": epsilon,
+                    f"{algo}/reward": ep_reward,
+                    f"{algo}/length": ep_length,
+                    f"{algo}/duration": ep_duration,
+                })
+
+            if episode % eval_every == 0 or episode == episodes:
+                avg_reward = np.mean(episode_rewards[-eval_every:])
+                avg_length = np.mean(episode_lengths[-eval_every:])
+                print(f"[{algo.upper()} {episode}/{episodes}] Avg Reward (last {eval_every}): {avg_reward:.2f} | Avg Length: {avg_length:.2f} | Epsilon: {epsilon:.3f}")
+                if use_wandb:
+                    wandb.log({
+                        f"{algo}/avg_reward": avg_reward,
+                        f"{algo}/avg_length": avg_length
+                    })
+
+        env.close()
+        total_time = time.time() - start_time
+        print(f"{algo.upper()} training complete in {total_time:.1f}s. Final avg reward (last 100): {np.mean(episode_rewards[-100:]):.2f}")
+
+        if use_wandb:
+            wandb.log({f"{algo}/final_avg_reward_100": np.mean(episode_rewards[-100:])})
+
+        # Save results per agent
+        results[algo] = {
+            "agent": agent,
+            "rewards": episode_rewards,
+            "lengths": episode_lengths,
+            "durations": episode_durations,
+            "training_time": total_time
+        }
+
+    if use_wandb:
+        wandb.finish()
+
+    return results
+
 
 # -------------------------------
 # Evaluation
 # -------------------------------
-def evaluate(agent: BaseAgent, env_name: str, episodes: int = 100, max_steps: int = 1000, seed: int = 0):
+def evaluate(
+    agent: BaseAgent,
+    env_name: str,
+    episodes: int = 100,
+    max_steps: int = 1000,
+    seed: int = 0,
+    use_wandb: bool = False,
+    wandb_project: str = "rl_assignment",
+    algo: str = "ddqn",
+    lr: float = 1e-3,
+):
+    if use_wandb:
+        wandb.init(
+            project=wandb_project,
+            name=f"eval_{algo}_{env_name}_lr{lr}",
+            tags=["evaluation", algo, env_name],
+            config={
+                "env": env_name,
+                "algo": algo,
+                "lr": lr,
+                "episodes": episodes,
+            },
+        )
+
     env = make_env(env_name)
-    all_returns = []
-    episode_lengths = []
+    all_returns, episode_lengths, episode_durations = [], [], []
 
     for ep in range(episodes):
         state, _ = env.reset(seed=seed + ep)
-        ep_reward = 0.0
-        ep_length = 0
+        ep_reward, ep_length = 0.0, 0
+        start_time = time.time()
 
-        for t in range(max_steps):
+        for _ in range(max_steps):
             action = agent.select_action(state, epsilon=0.0)
-            step_result = env.step(action)
-            if len(step_result) == 5:
-                next_state, reward, terminated, truncated, info = step_result
-                done = terminated or truncated
-            else:
-                next_state, reward, done, info = step_result
-            state = next_state
+            next_state, reward, terminated, truncated, _ = env.step(action)
+            done = terminated or truncated
             ep_reward += reward
             ep_length += 1
+            state = next_state
             if done:
                 break
 
+        duration = time.time() - start_time
         all_returns.append(ep_reward)
         episode_lengths.append(ep_length)
-        print(f"Episode {ep + 1}: return = {ep_reward:.2f} | length = {ep_length}")
+        episode_durations.append(duration)
+
+        if use_wandb:
+            wandb.log({
+                "episode": ep + 1,
+                "return": ep_reward,
+                "length": ep_length,
+                "duration": duration,
+            })
 
     env.close()
-    mean_return = float(np.mean(all_returns))
-    mean_length = float(np.mean(episode_lengths))
-    print(f"\n✅ Average return over {episodes} episodes: {mean_return:.2f}")
-    print(f"✅ Average episode duration over {episodes} episodes: {mean_length:.2f}")
+    mean_return = np.mean(all_returns)
+    mean_length = np.mean(episode_lengths)
 
-    return mean_return, all_returns, episode_lengths
+    print(f"\n✅ Mean Return: {mean_return:.2f} | Mean Length: {mean_length:.2f}")
+
+    if use_wandb:
+        wandb.log({"mean_return": mean_return, "mean_length": mean_length})
+        wandb.finish()
+
+    return mean_return, all_returns, episode_lengths, episode_durations
+
+
+def evaluate_agents(
+    agents: dict,
+    env_name: str,
+    episodes: int = 100,
+    max_steps: int = 1000,
+    seed: int = 0,
+    use_wandb: bool = False,
+    wandb_project: str = "rl_assignment",
+):
+    """
+    Evaluate multiple agents in the same environment and same WandB run.
+    
+    agents: dict of {algo_name: agent_instance}, e.g. {"dqn": dqn_agent, "ddqn": ddqn_agent}
+    """
+    if use_wandb:
+        wandb.init(
+            project=wandb_project,
+            name=f"eval_agents_{env_name}",
+            tags=["evaluation", env_name],
+            config={
+                "env": env_name,
+                "episodes": episodes,
+                "agents": list(agents.keys())
+            },
+        )
+
+    results = {}
+
+    for algo, agent in agents.items():
+        env = make_env(env_name)
+        all_returns, episode_lengths, episode_durations = [], [], []
+
+        for ep in range(episodes):
+            state, _ = env.reset(seed=seed + ep)
+            ep_reward, ep_length = 0.0, 0
+            start_time = time.time()
+
+            for _ in range(max_steps):
+                action = agent.select_action(state, epsilon=0.0)
+                next_state, reward, terminated, truncated, _ = env.step(action)
+                done = terminated or truncated
+                ep_reward += reward
+                ep_length += 1
+                state = next_state
+                if done:
+                    break
+
+            duration = time.time() - start_time
+            all_returns.append(ep_reward)
+            episode_lengths.append(ep_length)
+            episode_durations.append(duration)
+
+            if use_wandb:
+                wandb.log({
+                    f"{algo}/episode": ep + 1,
+                    f"{algo}/return": ep_reward,
+                    f"{algo}/length": ep_length,
+                    f"{algo}/duration": duration,
+                })
+
+        env.close()
+        mean_return = np.mean(all_returns)
+        mean_length = np.mean(episode_lengths)
+
+        print(f"[{algo.upper()}] Mean Return: {mean_return:.2f} | Mean Length: {mean_length:.2f}")
+
+        if use_wandb:
+            wandb.log({
+                f"{algo}/mean_return": mean_return,
+                f"{algo}/mean_length": mean_length
+            })
+
+        results[algo] = {
+            "mean_return": mean_return,
+            "returns": all_returns,
+            "lengths": episode_lengths,
+            "durations": episode_durations
+        }
+
+    if use_wandb:
+        wandb.finish()
+
+    return results
+
 
 # -------------------------------
 # Record Playback
 # -------------------------------
-def record_playback(agent: BaseAgent, env_name: str, video_dir: str = "./videos", episodes: int = 3, max_steps: int = 1000):
-    try:
-        from gymnasium.wrappers import RecordVideo
-    except ImportError:
-        from gym.wrappers import RecordVideo
+def record_playback(
+    agent: BaseAgent,
+    env_name: str,
+    video_dir: str = "./videos",
+    file_name: str = "run1",
+    episodes: int = 3,
+    max_steps: int = 1000
+):
+    full_dir = os.path.join(video_dir, file_name)
+    os.makedirs(full_dir, exist_ok=True)
 
-    os.makedirs(video_dir, exist_ok=True)
     try:
         env = make_env(env_name, render_mode="rgb_array")
     except TypeError:
@@ -214,20 +481,16 @@ def record_playback(agent: BaseAgent, env_name: str, video_dir: str = "./videos"
             env.close()
             raise ValueError("Environment must support image render mode 'rgb_array'.")
 
-    env = RecordVideo(env, video_folder=video_dir, episode_trigger=lambda ep: True)
-    print(f"🎥 Recording {episodes} episode(s) to: {os.path.abspath(video_dir)}")
+    env = RecordVideo(env, video_folder=full_dir, episode_trigger=lambda ep: True)
+    print(f"🎥 Recording {episodes} episode(s) to: {os.path.abspath(full_dir)}")
 
     for ep in range(episodes):
         state, _ = env.reset(seed=1000 + ep)
         ep_reward = 0.0
         for t in range(max_steps):
             action = agent.select_action(state, epsilon=0.0)
-            step_result = env.step(action)
-            if len(step_result) == 5:
-                next_state, reward, terminated, truncated, info = step_result
-                done = terminated or truncated
-            else:
-                next_state, reward, done, info = step_result
+            next_state, reward, terminated, truncated, info = env.step(action)
+            done = terminated or truncated
             state = next_state
             ep_reward += reward
             if done:
@@ -235,7 +498,7 @@ def record_playback(agent: BaseAgent, env_name: str, video_dir: str = "./videos"
         print(f"Recorded Episode {ep + 1}: return = {ep_reward:.2f}")
 
     env.close()
-    print(f"🎬 Videos saved in: {os.path.abspath(video_dir)}")
+    print(f"🎬 Saved in: {os.path.abspath(full_dir)}")
 
 ################################################################
 # # -------------------------------
@@ -339,39 +602,39 @@ def record_playback(agent: BaseAgent, env_name: str, video_dir: str = "./videos"
 # Main: train with predefined best hyperparameters
 # -------------------------------
 if __name__ == "__main__":
-    # Best parameters obtained from previous Optuna runs
+    
     best_params_per_env = {
 
-        "CartPole-v1": {
-            "lr": 0.0000677,  
-            "gamma": 0.9921,
-            "batch_size": 32,
-            "replay_size": 20_000,
-            "eps_decay_steps": 14_690,
-            "episodes": 300,       # more suitable for CartPole
-            "min_replay_size": 1_000
-        },
+    #     "CartPole-v1": {
+    #         "lr": 0.0000677,  
+    #         "gamma": 0.9921,
+    #         "batch_size": 32,
+    #         "replay_size": 20_000,
+    #         "eps_decay_steps": 14_690,
+    #         "episodes": 300,       # more suitable for CartPole
+    #         "min_replay_size": 1_000
+    #     },
 
-        "Acrobot-v1": {
-            "lr": 0.000575,
-            "gamma": 0.9959,
-            "batch_size": 256,
-            "replay_size": 100_000,
-            "eps_decay_steps": 57_279,
-            "episodes": 450,
-            "min_replay_size": 3_000
-        },
+    #     "Acrobot-v1": {
+    #         "lr": 0.000575,
+    #         "gamma": 0.9959,
+    #         "batch_size": 256,
+    #         "replay_size": 100_000,
+    #         "eps_decay_steps": 57_279,
+    #         "episodes": 450,
+    #         "min_replay_size": 3_000
+    #     },
         
 
-        "MountainCar-v0": {
-            "lr": 0.000607,
-            "gamma": 0.9987,
-            "batch_size": 192,
-            "replay_size": 200_000,
-            "eps_decay_steps": 109_556,
-            "episodes": 1300,
-            "min_replay_size": 7_000
-        },
+        # "MountainCar-v0": {
+        #     "lr": 0.000607,
+        #     "gamma": 0.9987,
+        #     "batch_size": 192,
+        #     "replay_size": 200_000,
+        #     "eps_decay_steps": 109_556,
+        #     "episodes": 1300,
+        #     "min_replay_size": 7_000
+        # },
 
         "Pendulum-v1": {
             "lr": 0.000155,
@@ -386,12 +649,13 @@ if __name__ == "__main__":
 
     for env_name, params in best_params_per_env.items():
         print(f"\n--- Training {env_name} with best parameters ---\n")
-        
-        agent, stats = train(
+
+        # Train both DQN and DDQN in the same run
+        results_train = train_agents(
             env_name=env_name,
-            algo="ddqn",
-            episodes=params["episodes"],  
+            episodes=params["episodes"],
             lr=params["lr"],
+            hidden_dims=params.get("hidden_dims", (128, 128)),
             gamma=params["gamma"],
             batch_size=params["batch_size"],
             replay_size=params["replay_size"],
@@ -400,19 +664,25 @@ if __name__ == "__main__":
             use_wandb=True
         )
 
-        # Evaluate on 100 episodes and get durations
-        mean_reward, all_rewards, episode_lengths = evaluate(agent, env_name=env_name, episodes=100)
+        # Evaluate both agents in the same run
+        results_eval = evaluate_agents(
+            agents={algo: results_train[algo]["agent"] for algo in results_train},
+            env_name=env_name,
+            use_wandb=True,
+            episodes=100
+        )
 
-        # Plot episode durations to show stability
-        import matplotlib.pyplot as plt
+        # Record a few episodes for each agent
+        for algo, data in results_train.items():
+            # results_train stores a dict per algorithm with keys: 'agent', 'rewards', etc.
+            agent = data["agent"]
+            experiment_name = f"{algo}_{env_name}_{len(params.get('hidden_dims', (128, 128)))}_layers_lr{params['lr']}"
+            record_playback(
+                agent,
+                env_name=env_name,
+                video_dir=f"./videos_{env_name}",
+                file_name=experiment_name,
+                episodes=2
+            )
 
-        plt.figure(figsize=(10,5))
-        plt.plot(episode_lengths)
-        plt.xlabel("Episode")
-        plt.ylabel("Episode Duration (steps)")
-        plt.title(f"Episode Durations for {env_name}")
-        plt.show()
-
-        # Record a few episodes
-        record_playback(agent, env_name=env_name, video_dir=f"./videos_{env_name}", episodes=2)
 
