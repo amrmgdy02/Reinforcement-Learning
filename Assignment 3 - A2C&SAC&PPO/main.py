@@ -2,108 +2,207 @@ import gymnasium as gym
 from gymnasium.wrappers import RecordVideo
 import numpy as np
 import torch
-# Import the agent from the new file
-from SAC import SACAgent, ReplayBuffer, Transition 
+import os
 
-# -----------------------------
-# Hyperparameters (Revised)
-# -----------------------------
-ENV_ID = "Pendulum-v1"
-EPISODES = 400
-BATCH_SIZE = 256
-REPLAY_SIZE = 300000
-GAMMA = 0.99
-TAU = 0.005
-LR = 3e-4          # Increased from 1e-4
-MAX_STEPS = 200
-TEST_EPISODES = 10
-ALPHA = 0.05         
+from SAC import SACAgent, ReplayBuffer, Transition
 
 
-def train():
-    env = gym.make(ENV_ID)
+# ==========================================
+# ENVIRONMENT CONFIG: Hyperparameters per env
+# ==========================================
+ENV_CONFIG = {
+    "CartPole-v1": {
+    "episodes": 500,
+    "max_steps": 500,
+    "batch_size": 128,
+    "replay_size": 100_000,
+    "lr": 1e-3,
+    "gamma": 0.99,
+    "tau": 0.005, #tau for soft update it , inc tau makes the update faster, dec tau makes it slower
+    "alpha": 0.05, #entropy coefficient (H) to balance exploration and exploitation
+},
+
+    "Acrobot-v1": {
+        "episodes": 600,
+        "max_steps": 500,
+        "batch_size": 256,
+        "replay_size": 200_000,
+        "lr": 3e-4,
+        "gamma": 0.99,
+        "tau": 0.005,
+        "alpha": 0.2,
+    },
+
+    "MountainCar-v0": {
+        "episodes": 900,
+        "max_steps": 500,
+        "batch_size": 256,
+        "replay_size": 300_000,
+        "lr": 3e-4,
+        "gamma": 0.99,
+        "tau": 0.005,
+        "alpha": 0.5,
+    },
+
+    "Pendulum-v1": {
+        "episodes": 400,
+        "max_steps": 200,
+        "batch_size": 256,
+        "replay_size": 300_000,
+        "lr": 3e-4,
+        "gamma": 0.99,
+        "tau": 0.005,
+        "alpha": 0.05,
+    },
+}
+
+
+# ==========================================
+# Helper: Create agent based on action space
+# ==========================================
+def init_agent(env, config):
     obs_dim = env.observation_space.shape[0]
-    act_dim = env.action_space.shape[0]
-    # This is correct: max_action will be 2.0 for Pendulum-v1
-    max_action = float(env.action_space.high[0]) 
 
-    sac = SACAgent(obs_dim, act_dim, max_action, lr=LR, gamma=GAMMA, tau=TAU, alpha=ALPHA)
-    buffer = ReplayBuffer(REPLAY_SIZE)
+    if isinstance(env.action_space, gym.spaces.Box):
+        return SACAgent(
+            state_dim=obs_dim,
+            action_dim=env.action_space.shape[0],
+            max_action=float(env.action_space.high[0]),
+            lr=config["lr"],
+            gamma=config["gamma"],
+            tau=config["tau"],
+            alpha=config["alpha"],
+            action_type="continuous"
+        )
 
-    log_interval = 10
-    
-    for ep in range(EPISODES):
+    elif isinstance(env.action_space, gym.spaces.Discrete):
+        return SACAgent(
+            state_dim=obs_dim,
+            action_dim=env.action_space.n,
+            max_action=1.0,
+            lr=config["lr"],
+            gamma=config["gamma"],
+            tau=config["tau"],
+            alpha=config["alpha"],
+            action_type="discrete"
+        )
+
+    raise ValueError("Unsupported action space type!")
+
+
+# ==========================================
+# TRAIN FUNCTION
+# ==========================================
+def train(env_id):
+
+    cfg = ENV_CONFIG[env_id]
+
+    # Create model directory per environment
+    model_dir = os.path.join("models", env_id)
+    os.makedirs(model_dir, exist_ok=True)
+    model_path = os.path.join(model_dir, "sac_model")
+
+    env = gym.make(env_id)
+    agent = init_agent(env, cfg)
+    buffer = ReplayBuffer(cfg["replay_size"])
+
+    print(f"\n=== TRAINING {env_id} ({agent.action_type.upper()}) ===")
+
+    for ep in range(cfg["episodes"]):
         state, _ = env.reset()
         ep_reward = 0
-        critic_loss_sum = 0
-        actor_loss_sum = 0
-        update_count = 0
-        
-        for step in range(MAX_STEPS):
-            action = sac.select_action(state)
-            next_state, reward, terminated, truncated, _ = env.step(action)
-            done = terminated or truncated
+        c_loss_sum = 0
+        a_loss_sum = 0
+        updates = 0
+
+        for step in range(cfg["max_steps"]):
+            action = agent.select_action(state)
+            next_state, reward, term, trunc, _ = env.step(action)
+            done = term or trunc
 
             buffer.push(Transition(state, action, reward, next_state, done))
             state = next_state
             ep_reward += reward
 
-            if len(buffer) > BATCH_SIZE:
-                c_loss, a_loss = sac.train(buffer, BATCH_SIZE)
-                critic_loss_sum += c_loss
-                actor_loss_sum += a_loss
-                update_count += 1
+            if len(buffer) > cfg["batch_size"]:
+                c_loss, a_loss = agent.train(buffer, cfg["batch_size"])
+                c_loss_sum += c_loss
+                a_loss_sum += a_loss
+                updates += 1
 
             if done:
                 break
-        
-        avg_critic_loss = critic_loss_sum / update_count if update_count > 0 else 0
-        avg_actor_loss = actor_loss_sum / update_count if update_count > 0 else 0
 
-        print(f"Episode {ep+1:03d}: Reward = {ep_reward:.2f} | Avg Critic Loss = {avg_critic_loss:.4f} | Avg Actor Loss = {avg_actor_loss:.4f}")
+        avg_c = c_loss_sum / updates if updates > 0 else 0
+        avg_a = a_loss_sum / updates if updates > 0 else 0
 
-    sac.save("sac_pendulum")
+        print(f"[{env_id}] Ep {ep+1}/{cfg['episodes']} | "
+              f"Reward: {ep_reward:.2f} | C Loss: {avg_c:.4f} | A Loss: {avg_a:.4f}")
+
+    # Save model into its environment folder
+    agent.save(model_path)
+    print(f"✅ Model saved to: {model_path}")
+
     env.close()
 
 
-def test():
-    print("\nTesting SAC...")
-    env = gym.make(ENV_ID, render_mode="rgb_array")
-    # Note: Gymnasium will handle the video folder warning.
-    env = RecordVideo(env, video_folder="videos_pendulum", name_prefix="sac_test", episode_trigger=lambda x: x < 10)
+# ==========================================
+# TEST FUNCTION
+# ==========================================
+def test(env_id):
 
-    obs_dim = env.observation_space.shape[0]
-    act_dim = env.action_space.shape[0]
-    max_action = float(env.action_space.high[0])
+    cfg = ENV_CONFIG[env_id]
+    print(f"\n=== TESTING {env_id} ===")
 
-    # Reinitialize agent with default parameters (only architecture matters for loading)
-    sac = SACAgent(obs_dim, act_dim, max_action) 
-    sac.load("sac_pendulum")
+    # Create video directory per environment
+    video_dir = os.path.join("videos", env_id)
+    os.makedirs(video_dir, exist_ok=True)
 
-    test_rewards = []
-    
-    for ep in range(TEST_EPISODES):
-        # Use deterministic action for testing
-        state, _ = env.reset(seed=ep) 
-        total_reward = 0
-        for step in range(MAX_STEPS):
-            action = sac.select_action(state, deterministic=True) 
-            next_state, reward, terminated, truncated, _ = env.step(action)
-            total_reward += reward
+    model_path = os.path.join("models", env_id, "sac_model")
+
+    env = gym.make(env_id, render_mode="rgb_array")
+    env = RecordVideo(env, video_dir, name_prefix="test", episode_trigger=lambda e: e < 10)
+
+    agent = init_agent(env, cfg)
+    agent.load(model_path)
+
+    rewards = []
+
+    for ep in range(10):
+        state, _ = env.reset(seed=ep)
+        total = 0
+
+        for step in range(cfg["max_steps"]):
+            action = agent.select_action(state, deterministic=True)
+            next_state, reward, term, trunc, _ = env.step(action)
+
             state = next_state
-            if terminated or truncated:
+            total += reward
+
+            if term or trunc:
                 break
-        
-        test_rewards.append(total_reward)
-        print(f"Test Episode {ep+1}: Reward = {total_reward:.2f}")
 
-    avg_test_reward = np.mean(test_rewards)
-    print(f"\nAverage Test Reward over {TEST_EPISODES} episodes: {avg_test_reward:.2f}")
+        rewards.append(total)
+        print(f"[{env_id}] Test Episode {ep+1}: Reward = {total:.2f}")
 
+    print(f"\nAverage Test Reward for {env_id}: {np.mean(rewards):.2f}")
     env.close()
 
 
+# ==========================================
+# MAIN EXECUTION
+# ==========================================
 if __name__ == "__main__":
-    print("Training SAC on Pendulum-v1...")
-    #train()
-    test()
+
+    ENVIRONMENTS = [
+        "CartPole-v1",
+        "Acrobot-v1",
+        "MountainCar-v0",
+        "Pendulum-v1"
+    ]
+
+    for env_id in ENVIRONMENTS:
+        #train(env_id)
+        test(env_id)
+
+    print("\n✔ All environments trained and tested successfully.")
