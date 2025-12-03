@@ -6,7 +6,7 @@ import torch
 from SAC import SACAgent, ReplayBuffer, Transition 
 
 # -----------------------------
-# Hyperparameters
+# Hyperparameters (Revised)
 # -----------------------------
 ENV_ID = "Pendulum-v1"
 EPISODES = 400
@@ -14,10 +14,10 @@ BATCH_SIZE = 256
 REPLAY_SIZE = 300000
 GAMMA = 0.99
 TAU = 0.005
-LR = 1e-4
-ALPHA = 0.05   # Recommended low entropy factor
+LR = 3e-4          # Increased from 1e-4
 MAX_STEPS = 200
 TEST_EPISODES = 10
+ALPHA = 0.05         
 
 
 def train():
@@ -105,5 +105,5 @@ def test():
 
 if __name__ == "__main__":
     print("Training SAC on Pendulum-v1...")
-    train()
+    #train()
     test()
