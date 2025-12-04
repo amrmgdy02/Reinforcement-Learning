@@ -91,8 +91,8 @@ class A2CAgent:
         return returns
 
     def update(self, states, actions, rewards, dones):
-        states = torch.FloatTensor(states).to(self.device)
-        actions = torch.LongTensor(actions).unsqueeze(1).to(self.device)
+        states = torch.FloatTensor(np.array(states)).to(self.device)
+        actions = torch.LongTensor(np.array(actions)).unsqueeze(1).to(self.device)
         returns = torch.FloatTensor(self.compute_returns(rewards, dones)).unsqueeze(1).to(self.device)
         
         logits, values = self.ac_net(states)
