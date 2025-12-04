@@ -13,9 +13,7 @@ def get_device():
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-# -------------------------
 # Transition & ReplayBuffer
-# -------------------------
 class Transition:
     def __init__(self, state, action, reward, next_state, done):
         self.state = state
@@ -55,9 +53,8 @@ class ReplayBuffer:
         return len(self.buffer)
 
 
-# -------------------------
 # Actor Networks
-# -------------------------
+
 
 class ContinuousActor(nn.Module):
     def __init__(self, state_dim, action_dim, max_action):
@@ -66,8 +63,10 @@ class ContinuousActor(nn.Module):
         self.l2 = nn.Linear(256, 256)
         self.mean = nn.Linear(256, action_dim)
         self.log_std_layer = nn.Linear(256, action_dim)
-        self.max_action = float(max_action)
-
+        self.max_action = float(max_action) 
+        #max action for each environment 
+        #Why? Because the network outputs values in [-1, 1] after tanh,
+        #then we scale by max_action to match environment limits.
     def forward(self, state):
         x = F.relu(self.l1(state))
         x = F.relu(self.l2(x))
@@ -89,9 +88,7 @@ class DiscreteActor(nn.Module):
         return self.logits(x)
 
 
-# -------------------------
-# Critic Network (Twin Q)
-# -------------------------
+# Critic Network (Twin Q) we have two q networks to reduce overestimation bias
 class CriticNetwork(nn.Module):
     def __init__(self, state_dim, action_dim, discrete=False):
         super().__init__()
@@ -109,7 +106,7 @@ class CriticNetwork(nn.Module):
         self.l6 = nn.Linear(256, 1)
 
     def forward(self, state, action=None):
-        if self.discrete:
+        if self.discrete: 
             # action is used as index
             q_values = []
             for q_net in [(self.l1, self.l2, self.l3), (self.l4, self.l5, self.l6)]:
@@ -131,9 +128,7 @@ class CriticNetwork(nn.Module):
             return q1, q2
 
 
-# -------------------------
 # SAC Agent
-# -------------------------
 class SACAgent:
     def __init__(
         self,
@@ -170,10 +165,10 @@ class SACAgent:
         self.max_action = max_action
         self._eps = 1e-6
 
-    # -------------------------
     # Action selection
-    # -------------------------
     def select_action(self, state, deterministic=False):
+        #determine whether to use deterministic action (for evaluation) or sample (for training)
+        #for evalaution we want consistent actions no randomness
         state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
 
         if self.action_type == "continuous":
@@ -193,9 +188,7 @@ class SACAgent:
                 action = torch.distributions.Categorical(logits=logits).sample()
             return action.cpu().numpy().item()
 
-    # -------------------------
     # Continuous: sample action & log prob
-    # -------------------------
     def _sample_action_and_logprob(self, mean, log_std):
         std = log_std.exp()
         normal = torch.distributions.Normal(mean, std)
@@ -206,9 +199,7 @@ class SACAgent:
         log_prob = normal.log_prob(z).sum(dim=1, keepdim=True) - log_det_jacobian
         return action, log_prob
 
-    # -------------------------
     # Training step
-    # -------------------------
     def train(self, replay_buffer: ReplayBuffer, batch_size: int = 256):
         if len(replay_buffer) < batch_size:
             return 0, 0
@@ -220,9 +211,7 @@ class SACAgent:
         next_states = torch.FloatTensor(next_states_np).to(self.device)
         not_dones = (1.0 - torch.FloatTensor(dones_np).unsqueeze(1)).to(self.device)
 
-        # -------------------------
         # Critic Update
-        # -------------------------
         with torch.no_grad():
             if self.action_type == "continuous":
                 next_mean, next_log_std = self.actor(next_states)
@@ -248,9 +237,7 @@ class SACAgent:
         critic_loss.backward()
         self.critic_optimizer.step()
 
-        # -------------------------
         # Actor Update
-        # -------------------------
         if self.action_type == "continuous":
             mean, log_std = self.actor(states)
             action_new, log_prob_new = self._sample_action_and_logprob(mean, log_std)
@@ -270,18 +257,14 @@ class SACAgent:
         actor_loss.backward()
         self.actor_optimizer.step()
 
-        # -------------------------
         # Soft update target critic
-        # -------------------------
         with torch.no_grad():
             for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
                 target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
 
         return critic_loss.item(), actor_loss.item()
 
-    # -------------------------
     # Save / Load
-    # -------------------------
     def save(self, filename):
         torch.save(self.actor.state_dict(), filename + "_actor.pth")
         torch.save(self.critic.state_dict(), filename + "_critic.pth")
