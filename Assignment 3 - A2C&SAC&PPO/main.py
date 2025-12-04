@@ -74,16 +74,39 @@ A2C_CONFIG = {
         "entropy_coef": 0.04,    
         "hidden_dims": (256, 256),
         "update_frequency": 10,
-    }
-    ,
+    },
+    
     "CartPole-v1": {
-        "episodes": 3000,   
+        "episodes": 1000,   
         "max_steps": 500,
         "lr": 5e-4,              
         "gamma": 0.99,
-        "entropy_coef": 0.0001,  
+        "entropy_coef": 0.01,  
         "hidden_dims": (128, 128),
-        "update_frequency": 50,  
+        "update_frequency": 5,  
+    },
+    
+    "MountainCar-v0": {
+            "episodes": 5000,        # Needs MANY episodes to stumble upon the solution
+            "max_steps": 1000,       # CRITICAL: The default 200 is too short. 
+                                    # It needs time to swing back and forth randomly.
+            "lr": 1e-3,
+            "gamma": 0.99,
+            "entropy_coef": 0.0,     # Turn OFF entropy or keep it very low. 
+                                    # Random jitter kills momentum.
+            "hidden_dims": (64, 64), # Small brain. State is only 2 numbers (pos, vel).
+            "update_frequency": 100, # CRITICAL: Needs to remember the "swing" started 50 steps ago.
+        },
+    
+   "Pendulum-v1": {
+        "episodes": 2000,
+        "max_steps": 200,
+        "lr": 1e-3,              
+        "gamma": 0.95,           
+        "entropy_coef": 0.005,   
+        "hidden_dims": (128, 128),
+        "update_frequency": 50, 
+        "num_actions": 11
     }
 }
 
@@ -121,6 +144,30 @@ def init_agent(env, config):
 
     raise ValueError("Unsupported action space type!")
 
+class DiscretizeActionWrapper(gym.ActionWrapper):
+    """
+    Wrapper to discretize continuous action space for Pendulum.
+    Converts discrete actions (0 to num_actions-1) to continuous actions.
+    """
+    def __init__(self, env, num_actions=11):
+        super().__init__(env)
+        self.num_actions = num_actions
+        
+        # Get original continuous action bounds
+        self.action_low = env.action_space.low[0]
+        self.action_high = env.action_space.high[0]
+        
+        # Create discrete action space
+        self.action_space = gym.spaces.Discrete(num_actions)
+        
+    def action(self, act):
+        """
+        Convert discrete action to continuous action.
+        Maps action index to a value in [action_low, action_high]
+        """
+        # Map discrete action to continuous range
+        continuous_action = self.action_low + (act / (self.num_actions - 1)) * (self.action_high - self.action_low)
+        return np.array([continuous_action])
 
 # ==========================================
 # TRAIN FUNCTION
@@ -232,7 +279,11 @@ def train_a2c(env_id="Acrobot-v1"):
     os.makedirs(model_dir, exist_ok=True)
     model_path = os.path.join(model_dir, "a2c_model.pth")
     
+    # Create environment with discretization wrapper for Pendulum
     env = gym.make(env_id)
+    if env_id == "Pendulum-v1":
+        env = DiscretizeActionWrapper(env, num_actions=cfg["num_actions"])
+    
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.n
     
@@ -247,6 +298,8 @@ def train_a2c(env_id="Acrobot-v1"):
     
     print(f"\n=== TRAINING A2C on {env_id} ===")
     print(f"State Dim: {state_dim}, Action Dim: {action_dim}")
+    if env_id == "Pendulum-v1":
+        print(f"Action space discretized into {action_dim} bins")
     
     best_reward = float('-inf')
     episode_rewards = []
@@ -310,6 +363,7 @@ def train_a2c(env_id="Acrobot-v1"):
 # ==========================================
 # TEST FUNCTION FOR A2C
 # ==========================================
+import matplotlib.pyplot as plt
 def test_a2c(env_id="Acrobot-v1", num_episodes=10, render_video=True):
     cfg = A2C_CONFIG[env_id]
     print(f"\n=== TESTING A2C on {env_id} ===")
@@ -321,22 +375,26 @@ def test_a2c(env_id="Acrobot-v1", num_episodes=10, render_video=True):
     
     model_path = os.path.join("models_a2c", env_id, "a2c_model.pth")
     
-    # Initialize environment
+    # Initialize environment (with discretization for Pendulum)
     if render_video:
         env = gym.make(env_id, render_mode="rgb_array")
+        if env_id == "Pendulum-v1":
+            env = DiscretizeActionWrapper(env, num_actions=cfg["num_actions"])
         env = RecordVideo(
-            env, 
-            video_dir, 
-            name_prefix="a2c_test", 
+            env,
+            video_dir,
+            name_prefix="a2c_test",
             episode_trigger=lambda e: e < num_episodes
         )
     else:
         env = gym.make(env_id)
+        if env_id == "Pendulum-v1":
+            env = DiscretizeActionWrapper(env, num_actions=cfg["num_actions"])
     
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.n
     
-    # Initialize agent and load model
+    # Initialize agent and load weights
     agent = A2CAgent(
         state_dim=state_dim,
         action_dim=action_dim,
@@ -348,9 +406,15 @@ def test_a2c(env_id="Acrobot-v1", num_episodes=10, render_video=True):
     
     agent.load(model_path)
     print(f"[OK] Model loaded from: {model_path}")
+    if env_id == "Pendulum-v1":
+        print(f"Action space discretized into {action_dim} bins")
     
     rewards = []
+    durations = []
     
+    # ========================
+    #      RUN TEST EPISODES
+    # ========================
     for ep in range(num_episodes):
         state, _ = env.reset(seed=ep)
         total_reward = 0
@@ -368,21 +432,81 @@ def test_a2c(env_id="Acrobot-v1", num_episodes=10, render_video=True):
                 break
         
         rewards.append(total_reward)
+        durations.append(steps)
+        
         print(f"[{env_id}] Test Episode {ep+1}/{num_episodes}: "
-              f"Reward = {total_reward:.2f}, Steps = {steps}")
+              f"Reward = {total_reward:.2f}, Duration = {steps} steps")
     
+    # ========================
+    #     STABILITY METRICS
+    # ========================
     avg_reward = np.mean(rewards)
     std_reward = np.std(rewards)
     
-    print(f"\n{'='*50}")
+    avg_duration = np.mean(durations)
+    std_duration = np.std(durations)
+    
+    print("\n" + "="*50)
     print(f"Test Results for {env_id}:")
-    print(f"Average Reward: {avg_reward:.2f} +/- {std_reward:.2f}")
-    print(f"Min Reward: {np.min(rewards):.2f}")
-    print(f"Max Reward: {np.max(rewards):.2f}")
-    print(f"{'='*50}\n")
+    print(f"Average Reward:   {avg_reward:.2f} +/- {std_reward:.2f}")
+    print(f"Average Duration: {avg_duration:.1f} steps +/- {std_duration:.1f}")
+    print(f"Min Duration:     {np.min(durations)}")
+    print(f"Max Duration:     {np.max(durations)}")
+    print("="*50 + "\n")
     
     env.close()
-    return rewards
+    
+    # ========================
+    #         PLOTS
+    # ========================
+
+    episodes = np.arange(1, num_episodes + 1)
+
+    # --- Combined Plot (like your screenshot) ---
+    plt.figure(figsize=(10, 5))
+    
+    ax1 = plt.gca()
+    ax1.plot(episodes, rewards, marker='o', label="Reward")
+    ax1.set_xlabel("Episode")
+    ax1.set_ylabel("Reward")
+    ax1.grid(True)
+
+    ax2 = ax1.twinx()
+    ax2.plot(
+        episodes,
+        durations,
+        linestyle='--',
+        marker='s',
+        color='orange',
+        label="Episode Duration"
+    )
+    ax2.set_ylabel("Duration (steps)")
+
+    plt.title(f"{env_id} - Test Episode Analysis")
+    plt.tight_layout()
+    plt.show()
+
+    # --- Reward Only ---
+    plt.figure()
+    plt.plot(rewards, marker='o')
+    plt.title(f"A2C Test Rewards ({env_id})")
+    plt.xlabel("Episode")
+    plt.ylabel("Reward")
+    plt.grid(True)
+    plt.show()
+
+    # --- Duration Only ---
+    plt.figure()
+    plt.plot(durations, marker='s')
+    plt.title(f"A2C Episode Durations ({env_id})")
+    plt.xlabel("Episode")
+    plt.ylabel("Duration (steps)")
+    plt.grid(True)
+    plt.show()
+    
+    return rewards, durations
+
+
 
 
 # ==========================================
@@ -391,10 +515,10 @@ def test_a2c(env_id="Acrobot-v1", num_episodes=10, render_video=True):
 if __name__ == "__main__":
 
 
-    ENV_ID = "CartPole-v1"
+    ENV_ID = "Pendulum-v1"
     
     # Train the agent
-    train_a2c(ENV_ID)
+    # train_a2c(ENV_ID)
     
     # Test the agent
     test_a2c(ENV_ID, num_episodes=10, render_video=True)
