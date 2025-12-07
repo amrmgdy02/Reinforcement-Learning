@@ -3,5 +3,9 @@ test.ipynb
 videos/
 imgs/
 wandb/
+models/
 MNIST
 videos_ddqn
+*.pth
+*.npy
+*.txt
