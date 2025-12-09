@@ -33,24 +33,8 @@ SAC_CONFIGS = {
         "use_cnn": False,  # MLP for LunarLander
     },
 
-    # "CarRacing-v3": {
-    #     "total_timesteps": 1_000_000,
-    #     "start_timesteps": 20_000,
-    #     "batch_size": 128,  # Reduced for memory efficiency with images
-    #     "gamma": 0.99,
-    #     "tau": 0.005,
-    #     "alpha": 0.1,
-    #     "lr": 3e-4,
-    #     "buffer_capacity": 100_000,  # Reduced due to image storage
-    #     "eval_episodes": 5,
-    #     "eval_max_steps": 2000,
-    #     "continuous_action_space": True,
-    #     "use_cnn": True,  # CNN for CarRacing
-    #     "frame_skip": 4,  # Skip frames to speed up training
-    #     "grayscale": False,  # Keep RGB for better visual info
-    # }
     "CarRacing-v3": {
-        "total_timesteps": 30000,
+        "total_timesteps": 1_000_000,
         "start_timesteps": 20_000,
         "batch_size": 128,  # Reduced for memory efficiency with images
         "gamma": 0.99,
@@ -65,6 +49,7 @@ SAC_CONFIGS = {
         "frame_skip": 4,  # Skip frames to speed up training
         "grayscale": False,  # Keep RGB for better visual info
     }
+    
 }
 
 
@@ -323,7 +308,8 @@ def eval_sac_without_training(
     model_path,
     eval_episodes=5,
     eval_max_steps=1000,
-    eval_video_dir="videos_eval"
+    eval_video_dir="videos_eval",
+    seed=42  # Add seed for reproducibility
 ):
     device = get_device()
     
@@ -333,6 +319,13 @@ def eval_sac_without_training(
     
     cfg = SAC_CONFIGS[env_name]
     use_cnn = cfg.get("use_cnn", False)
+
+    # Set seeds for reproducibility
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.backends.cudnn.deterministic = True
 
     env_video_dir = os.path.join(eval_video_dir, env_name)
     os.makedirs(env_video_dir, exist_ok=True)
@@ -361,7 +354,8 @@ def eval_sac_without_training(
     agent.load(model_path)
 
     for ep in range(eval_episodes):
-        state = preprocess_frame(env.reset()[0], use_cnn)
+        # Reset with seed for reproducibility (different seed per episode for variety)
+        state = preprocess_frame(env.reset(seed=seed + ep)[0], use_cnn)
         done = False
         ep_reward = 0
         steps = 0
@@ -389,10 +383,10 @@ if __name__ == "__main__":
     #train_sac_with_eval("LunarLander-v3")
 
     # Train on CarRacing (uses CNN)
-    train_sac_with_eval("CarRacing-v3")
+    #train_sac_with_eval("CarRacing-v3")
 
     # Evaluate only (LunarLander)
-    #eval_sac_without_training("LunarLander-v3", "models/LunarLander-v3/sac_model")
+    eval_sac_without_training("LunarLander-v3", "models/LunarLander-v3/sac_model")
     
     # Evaluate only (CarRacing)
-    # eval_sac_without_training("CarRacing-v3", "models/CarRacing-v3/sac_model")
+    #eval_sac_without_training("CarRacing-v3", "models/CarRacing-v3/sac_model")
