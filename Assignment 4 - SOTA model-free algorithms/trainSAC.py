@@ -17,48 +17,105 @@ from SAC import SACAgent, ReplayBuffer, Transition, get_device
 # =========================================================
 # ENVIRONMENT-SPECIFIC SAC CONFIGURATIONS
 # =========================================================
-# =========================================================
 SAC_CONFIGS = {
     "LunarLander-v3": {
-        "total_timesteps": 750_000,   # Increased for robust convergence
+        "total_timesteps": 750_000,
         "start_timesteps": 10_000,
         "batch_size": 256,
         "gamma": 0.99,
         "tau": 0.005,
-        "alpha": 0.2,                 # Keep fixed, or set to 'auto' if supported
+        "alpha": 0.2,
         "lr": 3e-4,
-        "buffer_capacity": 500_000,   # Slightly increased for better data diversity
+        "buffer_capacity": 500_000,
         "eval_episodes": 5,
         "eval_max_steps": 1000,
         "continuous_action_space": True,
+        "use_cnn": False,  # MLP for LunarLander
     },
 
+    # "CarRacing-v3": {
+    #     "total_timesteps": 1_000_000,
+    #     "start_timesteps": 20_000,
+    #     "batch_size": 128,  # Reduced for memory efficiency with images
+    #     "gamma": 0.99,
+    #     "tau": 0.005,
+    #     "alpha": 0.1,
+    #     "lr": 3e-4,
+    #     "buffer_capacity": 100_000,  # Reduced due to image storage
+    #     "eval_episodes": 5,
+    #     "eval_max_steps": 2000,
+    #     "continuous_action_space": True,
+    #     "use_cnn": True,  # CNN for CarRacing
+    #     "frame_skip": 4,  # Skip frames to speed up training
+    #     "grayscale": False,  # Keep RGB for better visual info
+    # }
     "CarRacing-v3": {
-        "total_timesteps": 500_000,
+        "total_timesteps": 30000,
         "start_timesteps": 20_000,
-        "batch_size": 512,
+        "batch_size": 128,  # Reduced for memory efficiency with images
         "gamma": 0.99,
-        "tau": 0.01,
-        "alpha": 0.2,  
-        "lr": 1e-4,
-        "buffer_capacity": 1_000_000,
+        "tau": 0.005,
+        "alpha": 0.1,
+        "lr": 3e-4,
+        "buffer_capacity": 100_000,  # Reduced due to image storage
         "eval_episodes": 5,
         "eval_max_steps": 2000,
         "continuous_action_space": True,
+        "use_cnn": True,  # CNN for CarRacing
+        "frame_skip": 4,  # Skip frames to speed up training
+        "grayscale": False,  # Keep RGB for better visual info
     }
 }
 
 
 # =========================================================
-# Helper
+# Helper Functions
 # =========================================================
-def flatten_state(s):
-    """Flatten state to 1D array for MLP networks"""
-    return np.array(s, dtype=np.float32).reshape(-1)
+def flatten_state(s, use_cnn=False):
+    """
+    Flatten state for storage in replay buffer.
+    For CNN: keep image structure but flatten for buffer storage
+    For MLP: flatten completely
+    """
+    s = np.array(s, dtype=np.float32)
+    
+    if use_cnn and s.ndim == 3:  # Image: (H, W, C)
+        # Normalize to [0, 1]
+        s = s / 255.0
+        # Convert from (H, W, C) to (C, H, W) for PyTorch
+        s = np.transpose(s, (2, 0, 1))
+        # Flatten for buffer storage
+        return s.reshape(-1)
+    elif s.ndim == 3:  # Image but not using CNN
+        s = s / 255.0 
+        return s.reshape(-1)
+    else:  # Vector state
+        return s.reshape(-1)
+
+
+def preprocess_frame(frame, use_cnn=False):
+    """
+    Preprocess a single frame for the agent.
+    For CNN: resize and normalize
+    For MLP: flatten
+    """
+    frame = np.array(frame, dtype=np.float32)
+    
+    if use_cnn and frame.ndim == 3:
+        # CarRacing default is 96x96x3, normalize to [0,1]
+        frame = frame / 255.0
+        # Convert to (C, H, W) format
+        frame = np.transpose(frame, (2, 0, 1))
+        return frame
+    else:
+        # For MLP or vector states
+        if frame.ndim == 3:
+            frame = frame / 255.0
+        return frame.reshape(-1)
 
 
 # =========================================================
-# TRAINING FUNCTION (NOW USES CONFIGS AUTOMATICALLY)
+# TRAINING FUNCTION
 # =========================================================
 def train_sac_with_eval(
     env_name,
@@ -86,19 +143,22 @@ def train_sac_with_eval(
     eval_episodes = cfg["eval_episodes"]
     eval_max_steps = cfg["eval_max_steps"]
     continuous_action_space = cfg["continuous_action_space"]
+    use_cnn = cfg.get("use_cnn", False)
+    frame_skip = cfg.get("frame_skip", 1)
 
     # ---------------------------
     # Device setup
     # ---------------------------
     device = get_device()
     print(f"\nUsing device: {device}")
-    print(f"Training SAC on: {env_name}\n")
+    print(f"Training SAC on: {env_name}")
+    print(f"Using {'CNN' if use_cnn else 'MLP'} architecture\n")
 
     # ---------------------------
     # W&B initialization
     # ---------------------------
     wandb.login()
-    run_name = f"SAC_{env_name}"
+    run_name = f"SAC_{env_name}_{'CNN' if use_cnn else 'MLP'}"
 
     run = wandb.init(
         project=wandb_project,
@@ -111,17 +171,38 @@ def train_sac_with_eval(
     # ---------------------------
     env = gym.make(env_name, continuous=continuous_action_space)
     sample_obs, _ = env.reset()
-    state = flatten_state(sample_obs)
-    state_dim = state.shape[0]
+    
     action_dim = env.action_space.shape[0]
     max_action = float(env.action_space.high[0])
 
-    print(f"State dim: {state_dim}, Action dim: {action_dim}, Max action: {max_action}\n")
+    if use_cnn:
+        # For CNN, we need the image shape
+        input_channels = sample_obs.shape[2] if sample_obs.ndim == 3 else 3
+        state_dim = None  # Not used for CNN
+        print(f"Image shape: {sample_obs.shape}")
+        print(f"Input channels: {input_channels}, Action dim: {action_dim}, Max action: {max_action}\n")
+    else:
+        # For MLP, we need the flattened state dimension
+        state = flatten_state(sample_obs, use_cnn=False)
+        state_dim = state.shape[0]
+        input_channels = None
+        print(f"State dim: {state_dim}, Action dim: {action_dim}, Max action: {max_action}\n")
 
     # ---------------------------
     # Agent + Buffer
     # ---------------------------
-    agent = SACAgent(state_dim, action_dim, max_action, lr, gamma, tau, alpha, device)
+    agent = SACAgent(
+        state_dim=state_dim if not use_cnn else 0,
+        action_dim=action_dim,
+        max_action=max_action,
+        lr=lr,
+        gamma=gamma,
+        tau=tau,
+        alpha=alpha,
+        device=device,
+        use_cnn=use_cnn,
+        input_channels=input_channels if use_cnn else 3
+    )
     replay_buffer = ReplayBuffer(buffer_capacity)
 
     # ---------------------------
@@ -131,8 +212,9 @@ def train_sac_with_eval(
     episode_reward = 0
     episode_duration = 0
     steps_since_log = 0
+    frame_count = 0
 
-    state = flatten_state(env.reset()[0])
+    state = preprocess_frame(env.reset()[0], use_cnn)
 
     for t in range(total_timesteps):
 
@@ -142,15 +224,27 @@ def train_sac_with_eval(
         else:
             action = agent.select_action(state, deterministic=False)
 
-        # Step
-        next_state, reward, done, truncated, info = env.step(action)
-        next_state = flatten_state(next_state)
+        # Step with frame skip
+        total_reward = 0
+        done = False
+        truncated = False
+        
+        for _ in range(frame_skip):
+            next_state, reward, done, truncated, info = env.step(action)
+            total_reward += reward
+            frame_count += 1
+            if done or truncated:
+                break
+        
+        next_state = preprocess_frame(next_state, use_cnn)
 
-        # Store transition
-        replay_buffer.push(Transition(state, action, reward, next_state, done or truncated))
+        # Store transition (flatten for buffer storage)
+        state_flat = state.reshape(-1) if use_cnn else state
+        next_state_flat = next_state.reshape(-1) if use_cnn else next_state
+        replay_buffer.push(Transition(state_flat, action, total_reward, next_state_flat, done or truncated))
 
         state = next_state
-        episode_reward += reward
+        episode_reward += total_reward
         episode_duration += 1
 
         # Train SAC
@@ -163,13 +257,14 @@ def train_sac_with_eval(
             wandb.log({
                 "episode_reward": episode_reward,
                 "episode_duration": episode_duration,
-                "timestep": t
+                "timestep": t,
+                "frames": frame_count
             })
 
             episode_rewards.append(episode_reward)
             episode_reward = 0
             episode_duration = 0
-            state = flatten_state(env.reset()[0])
+            state = preprocess_frame(env.reset()[0], use_cnn)
 
         # Log avg reward
         steps_since_log += 1
@@ -201,7 +296,7 @@ def train_sac_with_eval(
     eval_env = RecordVideo(eval_env, env_video_dir, episode_trigger=lambda e: True)
 
     for ep in range(eval_episodes):
-        state = flatten_state(eval_env.reset()[0])
+        state = preprocess_frame(eval_env.reset()[0], use_cnn)
         done = False
         ep_reward = 0
         steps = 0
@@ -209,9 +304,10 @@ def train_sac_with_eval(
         while not done and steps < eval_max_steps:
             action = agent.select_action(state, deterministic=True)
             next_state, reward, done, truncated, info = eval_env.step(action)
-            state = flatten_state(next_state)
+            state = preprocess_frame(next_state, use_cnn)
             ep_reward += reward
             steps += 1
+            done = done or truncated
 
         print(f"[Eval] Episode {ep+1} reward = {ep_reward:.2f}")
 
@@ -230,6 +326,13 @@ def eval_sac_without_training(
     eval_video_dir="videos_eval"
 ):
     device = get_device()
+    
+    # Get config to determine if CNN is needed
+    if env_name not in SAC_CONFIGS:
+        raise ValueError(f"No SAC hyperparameters found for {env_name}")
+    
+    cfg = SAC_CONFIGS[env_name]
+    use_cnn = cfg.get("use_cnn", False)
 
     env_video_dir = os.path.join(eval_video_dir, env_name)
     os.makedirs(env_video_dir, exist_ok=True)
@@ -237,15 +340,28 @@ def eval_sac_without_training(
     env = RecordVideo(env, env_video_dir, episode_trigger=lambda e: True)
 
     sample_obs, _ = env.reset()
-    state_dim = flatten_state(sample_obs).shape[0]
     action_dim = env.action_space.shape[0]
     max_action = float(env.action_space.high[0])
+    
+    if use_cnn:
+        input_channels = sample_obs.shape[2] if sample_obs.ndim == 3 else 3
+        state_dim = 0
+    else:
+        state_dim = flatten_state(sample_obs, use_cnn=False).shape[0]
+        input_channels = 3
 
-    agent = SACAgent(state_dim, action_dim, max_action, device=device)
+    agent = SACAgent(
+        state_dim=state_dim,
+        action_dim=action_dim,
+        max_action=max_action,
+        device=device,
+        use_cnn=use_cnn,
+        input_channels=input_channels
+    )
     agent.load(model_path)
 
     for ep in range(eval_episodes):
-        state = flatten_state(env.reset()[0])
+        state = preprocess_frame(env.reset()[0], use_cnn)
         done = False
         ep_reward = 0
         steps = 0
@@ -253,9 +369,10 @@ def eval_sac_without_training(
         while not done and steps < eval_max_steps:
             action = agent.select_action(state, deterministic=True)
             next_state, reward, done, truncated, info = env.step(action)
-            state = flatten_state(next_state)
+            state = preprocess_frame(next_state, use_cnn)
             ep_reward += reward
             steps += 1
+            done = done or truncated
 
         print(f"[Eval] Episode {ep+1} reward = {ep_reward:.2f}")
 
@@ -263,18 +380,19 @@ def eval_sac_without_training(
     print(f"Videos saved to: {env_video_dir}")
 
 
-
 # =========================================================
 # MAIN
 # =========================================================
 if __name__ == "__main__":
 
-    # Train on LunarLander
+    # Train on LunarLander (uses MLP)
     #train_sac_with_eval("LunarLander-v3")
 
-    # Train on CarRacing
-    # train_sac_with_eval("CarRacing-v3")
+    # Train on CarRacing (uses CNN)
+    train_sac_with_eval("CarRacing-v3")
 
     # Evaluate only (LunarLander)
-    eval_sac_without_training("LunarLander-v3", "models/LunarLander-v3/sac_model")
-
+    #eval_sac_without_training("LunarLander-v3", "models/LunarLander-v3/sac_model")
+    
+    # Evaluate only (CarRacing)
+    # eval_sac_without_training("CarRacing-v3", "models/CarRacing-v3/sac_model")
