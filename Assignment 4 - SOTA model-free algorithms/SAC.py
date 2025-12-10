@@ -70,7 +70,10 @@ class CNNFeatureExtractor(nn.Module):
         # After conv1: (96 - 8) / 4 + 1 = 23
         # After conv2: (23 - 4) / 2 + 1 = 10
         # After conv3: (10 - 3) / 1 + 1 = 8
-        # So output is 64 * 8 * 8 = 4096
+        # So output is 64 * 8 * 8 = 4096 where 64 is the number of output channels from conv3
+        
+        #Flatten all feature maps into 1D vector
+        #feed into fully connected layer to get desired feature_dim which is 256 by default
         self.fc = nn.Linear(64 * 8 * 8, feature_dim)
         
     def forward(self, x):

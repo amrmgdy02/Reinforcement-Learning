@@ -33,21 +33,37 @@ SAC_CONFIGS = {
         "use_cnn": False,  # MLP for LunarLander
     },
 
+    # "CarRacing-v3": {
+    #     "total_timesteps": 1_000_000,
+    #     "start_timesteps": 20_000,
+    #     "batch_size": 128,  # Reduced for memory efficiency with images
+    #     "gamma": 0.99,
+    #     "tau": 0.005,
+    #     "alpha": 0.1,
+    #     "lr": 3e-4,
+    #     "buffer_capacity": 100_000,  # Reduced due to image storage
+    #     "eval_episodes": 5,
+    #     "eval_max_steps": 2000,
+    #     "continuous_action_space": True,
+    #     "use_cnn": True,  # CNN for CarRacing
+    #     "frame_skip": 4,  # Skip frames to speed up training
+    #     "grayscale": False,  # Keep RGB for better visual info
+    # }
     "CarRacing-v3": {
-        "total_timesteps": 1_000_000,
-        "start_timesteps": 20_000,
-        "batch_size": 128,  # Reduced for memory efficiency with images
+        "total_timesteps": 200_000,   # Reduced from 1M (sufficient if optimized)
+        "start_timesteps": 15_000,
+        "batch_size": 128,            # Fast batch size
         "gamma": 0.99,
         "tau": 0.005,
         "alpha": 0.1,
         "lr": 3e-4,
-        "buffer_capacity": 100_000,  # Reduced due to image storage
+        "buffer_capacity": 100_000,
         "eval_episodes": 5,
-        "eval_max_steps": 2000,
+        "eval_max_steps": 1000,
         "continuous_action_space": True,
-        "use_cnn": True,  # CNN for CarRacing
-        "frame_skip": 4,  # Skip frames to speed up training
-        "grayscale": False,  # Keep RGB for better visual info
+        "use_cnn": True,
+        "frame_skip": 3,              # Good balance of control and speed
+        #frame skip 3 means skip
     }
     
 }
