@@ -19,12 +19,12 @@ from SAC import SACAgent, ReplayBuffer, Transition, get_device
 # =========================================================
 SAC_CONFIGS = {
     "LunarLander-v3": {
-        "total_timesteps": 750_000,
+        "total_timesteps": 500_000,
         "start_timesteps": 10_000,
         "batch_size": 256,
         "gamma": 0.99,
         "tau": 0.005,
-        "alpha": 0.2,
+        "alpha": 0.05,
         "lr": 3e-4,
         "buffer_capacity": 500_000,
         "eval_episodes": 5,
@@ -33,21 +33,37 @@ SAC_CONFIGS = {
         "use_cnn": False,  # MLP for LunarLander
     },
 
+    # "CarRacing-v3": {
+    #     "total_timesteps": 1_000_000,
+    #     "start_timesteps": 20_000,
+    #     "batch_size": 128,  # Reduced for memory efficiency with images
+    #     "gamma": 0.99,
+    #     "tau": 0.005,
+    #     "alpha": 0.1,
+    #     "lr": 3e-4,
+    #     "buffer_capacity": 100_000,  # Reduced due to image storage
+    #     "eval_episodes": 5,
+    #     "eval_max_steps": 2000,
+    #     "continuous_action_space": True,
+    #     "use_cnn": True,  # CNN for CarRacing
+    #     "frame_skip": 4,  # Skip frames to speed up training
+    #     "grayscale": False,  # Keep RGB for better visual info
+    # }
     "CarRacing-v3": {
-        "total_timesteps": 1_000_000,
-        "start_timesteps": 20_000,
-        "batch_size": 128,  # Reduced for memory efficiency with images
+        "total_timesteps": 200_000,   # Reduced from 1M (sufficient if optimized)
+        "start_timesteps": 15_000,
+        "batch_size": 128,            # Fast batch size
         "gamma": 0.99,
         "tau": 0.005,
         "alpha": 0.1,
         "lr": 3e-4,
-        "buffer_capacity": 100_000,  # Reduced due to image storage
+        "buffer_capacity": 100_000,
         "eval_episodes": 5,
-        "eval_max_steps": 2000,
+        "eval_max_steps": 1000,
         "continuous_action_space": True,
-        "use_cnn": True,  # CNN for CarRacing
-        "frame_skip": 4,  # Skip frames to speed up training
-        "grayscale": False,  # Keep RGB for better visual info
+        "use_cnn": True,
+        "frame_skip": 3,              # Good balance of control and speed
+        #frame skip 3 means skip
     }
     
 }
@@ -303,10 +319,12 @@ def train_sac_with_eval(
 # =========================================================
 # EVALUATE ONLY (NO TRAINING)
 # =========================================================
+import matplotlib.pyplot as plt
+
 def eval_sac_without_training(
     env_name,
     model_path,
-    eval_episodes=5,
+    eval_episodes=100,
     eval_max_steps=1000,
     eval_video_dir="videos_eval",
     seed=42  # Add seed for reproducibility
@@ -330,7 +348,8 @@ def eval_sac_without_training(
     env_video_dir = os.path.join(eval_video_dir, env_name)
     os.makedirs(env_video_dir, exist_ok=True)
     env = gym.make(env_name, continuous=True, render_mode="rgb_array")
-    env = RecordVideo(env, env_video_dir, episode_trigger=lambda e: True)
+    # Only record first 5 episodes
+    env = RecordVideo(env, env_video_dir, episode_trigger=lambda e: e < 5)
 
     sample_obs, _ = env.reset()
     action_dim = env.action_space.shape[0]
@@ -353,8 +372,13 @@ def eval_sac_without_training(
     )
     agent.load(model_path)
 
+    # -----------------------------
+    # Track rewards and durations
+    # -----------------------------
+    all_rewards = []
+    all_durations = []
+
     for ep in range(eval_episodes):
-        # Reset with seed for reproducibility (different seed per episode for variety)
         state = preprocess_frame(env.reset(seed=seed + ep)[0], use_cnn)
         done = False
         ep_reward = 0
@@ -368,10 +392,39 @@ def eval_sac_without_training(
             steps += 1
             done = done or truncated
 
-        print(f"[Eval] Episode {ep+1} reward = {ep_reward:.2f}")
+        all_rewards.append(ep_reward)
+        all_durations.append(steps)
+        print(f"[Eval] Episode {ep+1} reward = {ep_reward:.2f}, duration = {steps}")
 
     env.close()
     print(f"Videos saved to: {env_video_dir}")
+
+    # -----------------------------
+    # Plot rewards and durations
+    # -----------------------------
+    episodes = list(range(1, eval_episodes + 1))
+
+    plt.figure(figsize=(12, 5))
+
+    # Plot rewards
+    plt.subplot(1, 2, 1)
+    plt.plot(episodes, all_rewards, marker='o', color='blue')
+    plt.title(f"{env_name} - Episode Rewards")
+    plt.xlabel("Episode")
+    plt.ylabel("Reward")
+    plt.grid(True)
+
+    # Plot durations
+    plt.subplot(1, 2, 2)
+    plt.plot(episodes, all_durations, marker='o', color='green')
+    plt.title(f"{env_name} - Episode Durations")
+    plt.xlabel("Episode")
+    plt.ylabel("Duration (steps)")
+    plt.grid(True)
+
+    plt.tight_layout()
+    plt.show()
+
 
 
 # =========================================================
@@ -386,7 +439,7 @@ if __name__ == "__main__":
     #train_sac_with_eval("CarRacing-v3")
 
     # Evaluate only (LunarLander)
-    eval_sac_without_training("LunarLander-v3", "models/LunarLander-v3/sac_model")
+    #eval_sac_without_training("LunarLander-v3", "models/LunarLander-v3/sac_model")
     
     # Evaluate only (CarRacing)
-    #eval_sac_without_training("CarRacing-v3", "models/CarRacing-v3/sac_model")
+    eval_sac_without_training("CarRacing-v3", "models/CarRacing-v3/sac_model")
