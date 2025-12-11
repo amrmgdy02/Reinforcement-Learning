@@ -9,3 +9,4 @@ videos_ddqn
 *.pth
 *.npy
 *.txt
+*.mp4
