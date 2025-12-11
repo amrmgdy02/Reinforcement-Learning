@@ -59,15 +59,22 @@ def evaluate_and_record(
 
     # 5. Run the evaluation loop
     print("\nStarting Evaluation...")
-    total_rewards = []
+    # Only record videos for the first 10 episodes
+    record_video_episodes = 10
+    episode_rewards = []
+    episode_durations = []
 
     for ep in range(num_episodes):
+        # Enable video recording only for first N episodes
+        if ep < record_video_episodes:
+            env._record_video = True
+        else:
+            env._record_video = False
         state = env.reset()
         score = 0
         done = False
         truncated = False
         step = 0
-        
         while not (done or truncated):
             # Deterministic=True makes the agent use its best predicted move (no random wiggling)
             action, _, _ = agent.select_action(state, deterministic=False)
@@ -81,11 +88,31 @@ def evaluate_and_record(
                 done = True
 
         print(f"Episode {ep+1}: Score = {score:.2f} (Steps: {step})")
-        total_rewards.append(score)
+        episode_rewards.append(score)
+        episode_durations.append(step)
 
     env.close()
-    print(f"\nAverage Score: {np.mean(total_rewards):.2f}")
-    print(f"Videos saved to: {video_folder}")
+    print(f"\nAverage Score: {np.mean(episode_rewards):.2f}")
+    print(f"Videos saved to: {video_folder} (only first {record_video_episodes} episodes)")
+
+    # Plot rewards and durations
+    import matplotlib.pyplot as plt
+    episodes = list(range(1, len(episode_rewards) + 1))
+    plt.figure(figsize=(12, 5))
+    plt.subplot(1, 2, 1)
+    plt.plot(episodes, episode_rewards, marker='o', color='blue')
+    plt.title("Episode Rewards")
+    plt.xlabel("Episode")
+    plt.ylabel("Reward")
+    plt.grid(True)
+    plt.subplot(1, 2, 2)
+    plt.plot(episodes, episode_durations, marker='o', color='green')
+    plt.title("Episode Durations")
+    plt.xlabel("Episode")
+    plt.ylabel("Duration (steps)")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
 
 
 if __name__ == "__main__":
@@ -113,7 +140,7 @@ if __name__ == "__main__":
     evaluate_and_record(
         model_path=MODEL_FILE,
         video_folder=VIDEO_FOLDER,
-        num_episodes=10,
+        num_episodes=100,
         img_stack=4,     # Must match training
         action_repeat=4  # Must match training
     )
