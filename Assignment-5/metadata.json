@@ -1,0 +1,7 @@
+{
+  "algorithm": "PPO",
+  "environment": "SpaceInvadersNoFrameskip-v4",
+  "mean_reward": 900,
+  "eval_episodes": 100,
+  "total_timesteps": 10000000
+}

@@ -1,0 +1,12 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Install dependencies in venv",
+			"type": "shell",
+			"command": "venv\\Scripts\\activate && pip install --upgrade pip && pip install ale-py gymnasium numpy torch torchvision torchaudio tyro wandb pygame optuna matplotlib gym tensordict huggingface_hub opencv-python",
+			"args": [],
+			"isBackground": false
+		}
+	]
+}
